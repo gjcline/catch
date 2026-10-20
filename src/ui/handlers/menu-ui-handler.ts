@@ -458,14 +458,6 @@ export class MenuUiHandler extends OptionSelectUiHandler {
         keepOpen: true,
       },
       {
-        label: "Discord",
-        handler: () => {
-          window.open(VITE_DISCORD_URL, "_blank")?.focus();
-          return true;
-        },
-        keepOpen: true,
-      },
-      {
         label: "GitHub",
         handler: () => {
           window.open(VITE_GITHUB_URL, "_blank")?.focus();
@@ -613,7 +605,8 @@ export class MenuUiHandler extends OptionSelectUiHandler {
         break;
       case MenuOptions.MANAGE_DATA:
         if (
-          !bypassLogin
+          false // CatchCrypt: no Discord/Google account linking
+          && !bypassLogin
           && !this.manageDataConfig.options.some(
             o =>
               o.label === i18next.t("menuUiHandler:linkDiscord")

@@ -147,6 +147,8 @@ export class SummaryUiHandler extends UiHandler {
 
     const summaryLabel = addTextObject(4, -165, i18next.t("pokemonSummary:pokemonInfo"), TextStyle.SUMMARY_HEADER);
     summaryLabel.setOrigin(0, 1);
+    // CatchCrypt: back hint
+    this.summaryContainer.add(addTextObject(250, -165, "ESC: Back", TextStyle.SUMMARY_HEADER).setOrigin(0, 1));
     this.summaryContainer.add(summaryLabel);
 
     this.summaryContainerDexNoLabel = globalScene.add.image(6, -151, getLocalizedSpriteKey("summary_dexnb_label")); // Pixel text 'No'

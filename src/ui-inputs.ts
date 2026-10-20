@@ -209,6 +209,8 @@ export class UiInputs {
         audioManager.playSound("ui/select");
         break;
       default:
+        // CatchCrypt: ESC/M backs out of anything that does not open the menu (summary, party, etc.)
+        globalScene.ui?.processInput(Button.CANCEL);
         return;
     }
   }
