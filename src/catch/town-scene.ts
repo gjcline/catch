@@ -75,6 +75,12 @@ export class TownScene extends Phaser.Scene {
     btn.setName("battle-button");
     btn.on("pointerdown", () => this.leave("button"));
     kb.on("keydown-B", () => this.leave("button"));
+    kb.on("keydown-ESC", () => this.leave("button"));
+    this.add
+      .text(width / 2 - (width / 2 - 20) / cam.zoom, height / 2 + (height / 2 - 20) / cam.zoom, "Arrows or WASD to walk.  Battle, B or Esc for the next wave.", {
+        fontFamily: "emerald, monospace", fontSize: "36px", color: "#ffffff", backgroundColor: "#1b2440cc", padding: { x: 16, y: 8 },
+      })
+      .setOrigin(0, 1).setScrollFactor(0).setDepth(100).setScale(1 / cam.zoom).setName("town-hint");
   }
 
   private blocked(x: number, y: number): boolean {
