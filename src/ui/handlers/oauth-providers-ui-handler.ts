@@ -76,7 +76,7 @@ export abstract class OAuthProvidersUiHandler extends LoginRegisterInfoContainer
 
     this.externalPartyContainer //
       .setPositionRelative(this.modalContainer, 175, 0)
-      .setVisible(true);
+      .setVisible(false); // CatchCrypt: no Discord/Google login
 
     const bgWidth = this.externalPartyTitle.text.length + 50;
     this.externalPartyBg.setSize(bgWidth, this.modalBg.height);

@@ -3,6 +3,7 @@
  * This client only REPORTS game events. It never decides rewards: the private
  * catch-backend validates each event and makes every roll server-side.
  */
+import { loggedInUser } from "#app/account";
 import { globalScene } from "#app/global-scene";
 
 import { SESSION_ID_COOKIE_NAME } from "#app/constants";
@@ -52,4 +53,16 @@ export function catchReport(type: "catch" | "battle_won" | "wave_reached" | "run
       window.dispatchEvent(new CustomEvent("catch:reward", { detail: res.reward }));
     }
   });
+}
+
+const TIP =
+  "Catches and wins have a chance to drop real Collector Crypt cards when you play with a connected wallet.";
+let tipShown = false;
+/** Once per session, after a win or catch, remind players without a linked wallet. */
+export function catchWalletTip(): void {
+  if (tipShown || loggedInUser?.wallet) {
+    return;
+  }
+  tipShown = true;
+  globalScene.phaseManager.queueMessage(TIP, null, true);
 }
