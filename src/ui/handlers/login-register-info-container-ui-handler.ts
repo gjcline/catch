@@ -246,7 +246,7 @@ export abstract class LoginRegisterInfoContainerUiHandler extends FormModalUiHan
     const a = document.createElement("a");
 
     a.href = url;
-    a.download = "pokerogue_saves.zip";
+    a.download = "catchcrypt_saves.zip";
     a.click();
 
     URL.revokeObjectURL(url);

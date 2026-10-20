@@ -5,16 +5,15 @@
  */
 import { globalScene } from "#app/global-scene";
 
-const API: string = (import.meta as any).env?.VITE_CATCH_API ?? "http://localhost:8787";
-let token: string | null = localStorage.getItem("catch_token");
+import { SESSION_ID_COOKIE_NAME } from "#app/constants";
+import { getCookie } from "#utils/cookies";
+
+const API: string = import.meta.env.VITE_SERVER_URL ?? "";
+let token: string | null = null;
 let runId: string | null = null;
 
-export function setCatchSession(t: string): void {
-  token = t;
-  localStorage.setItem("catch_token", t);
-}
-
 async function post(path: string, body: unknown): Promise<any> {
+  token = getCookie(SESSION_ID_COOKIE_NAME) || null;
   if (!token) {
     return null;
   }

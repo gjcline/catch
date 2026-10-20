@@ -77,7 +77,7 @@ export class TimedEventManager {
   }
 
   public getLogoKey(): string {
-    return this.activeEvent()?.logo ?? "logo";
+    return "logo"; // CatchCrypt: always our logo
   }
 
   getEventBannerLangs(): string[] {

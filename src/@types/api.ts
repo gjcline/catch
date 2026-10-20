@@ -6,6 +6,8 @@ export interface UserInfo {
   discordId: string;
   googleId: string;
   hasAdminRole: boolean;
+  /** CatchCrypt: linked Solana wallet, if any */
+  wallet?: string | null;
 }
 
 export interface TitleStatsResponse {

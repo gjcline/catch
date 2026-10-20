@@ -16,6 +16,9 @@ export async function updateUserInfo(): Promise<[success: boolean, status: numbe
       return [false, status];
     }
     loggedInUser = accountInfo;
+    if (!(accountInfo as any).wallet) {
+      void import("#app/catch/wallet-link").then(m => m.showWalletPrompt());
+    }
     return [true, 200];
   }
 

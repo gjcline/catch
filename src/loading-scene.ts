@@ -465,12 +465,7 @@ export class LoadingScene extends SceneBase {
       disclaimerDescriptionText,
     );
 
-    if (!mobile) {
-      loadingGraphics.forEach(g => {
-        g.setVisible(false);
-      });
-    }
-
+    // CatchCrypt: no studio intro video; loading graphics show immediately.
     const intro = this.add
       .video(0, 0)
       .setOrigin(0)
@@ -490,13 +485,7 @@ export class LoadingScene extends SceneBase {
 
     this.load
       .once(this.LOAD_EVENTS.START, () => {
-        // videos do not need to be preloaded
-        intro.loadURL("images/intro_dark.mp4", true);
-        if (mobile) {
-          intro.video?.setAttribute("webkit-playsinline", "webkit-playsinline");
-          intro.video?.setAttribute("playsinline", "playsinline");
-        }
-        intro.play();
+        // CatchCrypt: intro video removed
       })
       .on(this.LOAD_EVENTS.PROGRESS, (progress: number) => {
         percentText.setText(`${Math.floor(progress * 100)}%`);

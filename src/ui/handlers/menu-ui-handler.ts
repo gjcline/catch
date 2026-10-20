@@ -442,6 +442,14 @@ export class MenuUiHandler extends OptionSelectUiHandler {
 
     const communityOptions: OptionSelectItem[] = [
       {
+        label: "Connect Wallet",
+        handler: () => {
+          void import("#app/catch/wallet-link").then(m => m.showWalletPrompt(true));
+          return true;
+        },
+        keepOpen: true,
+      },
+      {
         label: "Wiki",
         handler: () => {
           window.open(wikiUrl, "_blank")?.focus();
