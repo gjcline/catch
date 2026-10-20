@@ -461,9 +461,10 @@ export class LoadingScene extends SceneBase {
       logo,
       percentText,
       assetText,
-      disclaimerText,
-      disclaimerDescriptionText,
     );
+    // CatchCrypt: no disclaimer on the loading screen
+    disclaimerText.destroy();
+    disclaimerDescriptionText.destroy();
 
     // CatchCrypt: no studio intro video; loading graphics show immediately.
     const intro = this.add
