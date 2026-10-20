@@ -827,6 +827,27 @@ class ModifierOption extends Phaser.GameObjects.Container {
     this.item = getItem();
     this.itemContainer.add(this.item);
 
+    // CatchCrypt: make the Collector Crypt card offer stand out with a pulsing gold and rainbow glow.
+    if (this.modifierTypeOption.type?.id === "CC_CARD_OFFER") {
+      const ring = globalScene.add.graphics();
+      ring.fillStyle(0xffd700, 0.35).fillCircle(0, 0, 30);
+      ring.lineStyle(4, 0xffd700, 1).strokeCircle(0, 0, 30);
+      ring.setBlendMode(Phaser.BlendModes.ADD);
+      const glow = getItem().setTintFill(0xffd700).setScale(1.5).setBlendMode(Phaser.BlendModes.ADD);
+      this.itemContainer.addAt(ring, 0);
+      this.itemContainer.addAt(glow, 1);
+      globalScene.tweens.add({ targets: [ring, glow], scale: { from: 1.2, to: 1.8 }, alpha: { from: 1, to: 0.35 }, duration: 700, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+      globalScene.tweens.addCounter({
+        from: 0, to: 360, duration: 2400, repeat: -1,
+        onUpdate: t => {
+          const c = Phaser.Display.Color.HSVToRGB(((t.getValue() ?? 0) % 360) / 360, 0.6, 1) as Phaser.Types.Display.ColorObject;
+          const hex = Phaser.Display.Color.GetColor(c.r, c.g, c.b);
+          ring.clear().fillStyle(hex, 0.35).fillCircle(0, 0, 30).lineStyle(4, hex, 1).strokeCircle(0, 0, 30);
+          this.itemText?.setTint(hex);
+        },
+      });
+    }
+
     if (!this.modifierTypeOption.cost) {
       this.itemTint = getItem();
       this.itemTint.setTintFill(Phaser.Display.Color.GetColor(255, 192, 255));

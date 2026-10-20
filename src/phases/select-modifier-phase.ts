@@ -134,6 +134,7 @@ export class SelectModifierPhase extends BattlePhase {
     void catchOfferFor(globalScene.currentBattle.waveIndex).then(offer => {
       if (offer && !this.typeOptions.some(o => o.type instanceof CardOfferModifierType)) {
         this.typeOptions.push(new ModifierTypeOption(new CardOfferModifierType(offer), 0));
+        (window as any).__ccCardOffer = ((window as any).__ccCardOffer ?? 0) + 1;
       }
       this.resetModifierSelect(modifierSelectCallback);
     });

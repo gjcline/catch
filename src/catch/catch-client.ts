@@ -59,7 +59,7 @@ export async function catchAcceptOffer(offer: CardOffer): Promise<string> {
   const res = await post(`/api/offers/${offer.id}/accept`, {});
   if (res?.claim) {
     offer.status = "awaiting_claim";
-    return res.message ?? "Card reserved! Claim it at catchcrypt.com";
+    return "Your Collector Crypt card is being sent to your connected wallet now! Any older reserved cards send when you open Menu, then Community, then My Cards.";
   }
   offer.status = "expired";
   return "That card offer is no longer available.";

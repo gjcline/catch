@@ -137,7 +137,7 @@ export async function showClaimsList(): Promise<void> {
   const claims = await catchClaims();
   const esc = (t: string) => t.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
   const label: Record<string, string> = {
-    awaiting_claim: "Reserved, claim at catchcrypt.com",
+    awaiting_claim: "Reserved, sending to your wallet",
     sending: "Sending",
     sent: "Sent",
     sent_dry: "Sent (test)",

@@ -192,6 +192,9 @@ export function enterTown(battle: Phaser.Scene, resume: () => void): void {
   battle.scene.setVisible(false);
   (window as any).__ccScenes = () => mgr.getScenes(false).map(sc => `${sc.scene.key}:${sc.scene.isActive()}:${sc.scene.isVisible()}`);
   (window as any).__ccInTown = true;
+  if (mgr.isActive(KEY) || mgr.isVisible(KEY)) {
+    mgr.stop(KEY); // CatchCrypt: never stack a second town start on a half started one
+  }
   mgr.start(KEY);
   mgr.bringToTop(KEY);
 }

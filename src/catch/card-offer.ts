@@ -13,6 +13,6 @@ export class CardOfferModifierType extends ModifierType {
     return "Random Collector Crypt Card";
   }
   override getDescription(): string {
-    return "A Collector Crypt card is reserved for you. Pick it to claim it at catchcrypt.com instead of an item.";
+    return "A real Collector Crypt card for your wallet. Pick it instead of an item and it gets sent to your connected wallet.";
   }
 }
