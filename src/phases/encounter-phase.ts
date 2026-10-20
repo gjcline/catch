@@ -1,3 +1,4 @@
+import { enterTown, townEnabled } from "#app/catch/town-scene";
 import { applyAbAttrs } from "#abilities/apply-ab-attrs";
 import { PLAYER_PARTY_MAX_SIZE, WEIGHT_INCREMENT_ON_SPAWN_MISS } from "#app/constants";
 import { audioManager } from "#app/global-audio-manager";
@@ -50,7 +51,17 @@ export class EncounterPhase extends BattlePhase {
     this.loaded = loaded;
   }
 
+  /** CatchCrypt: true while resuming from the town, so the gate opens once per encounter. */
+  static townDone = false;
+
   start() {
+    // CatchCrypt: walk the town between waves; the encounter itself is untouched PokeRogue.
+    if (townEnabled() && !EncounterPhase.townDone) {
+      EncounterPhase.townDone = true;
+      enterTown(globalScene, () => this.start());
+      return;
+    }
+    EncounterPhase.townDone = false;
     super.start();
 
     globalScene.updateGameInfo();
