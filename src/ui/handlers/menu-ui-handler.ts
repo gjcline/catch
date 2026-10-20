@@ -450,6 +450,14 @@ export class MenuUiHandler extends OptionSelectUiHandler {
         keepOpen: true,
       },
       {
+        label: "My Cards",
+        handler: () => {
+          void import("#app/catch/wallet-link").then(m => m.showClaimsList());
+          return true;
+        },
+        keepOpen: true,
+      },
+      {
         label: "Wiki",
         handler: () => {
           window.open(wikiUrl, "_blank")?.focus();

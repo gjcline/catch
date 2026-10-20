@@ -129,3 +129,43 @@ export function showWalletPrompt(force = false): Promise<void> {
     };
   });
 }
+
+/** "My Cards": the account's reserved and claimed Collector Crypt cards. */
+export async function showClaimsList(): Promise<void> {
+  document.getElementById("cc-claims")?.remove();
+  const { catchClaims } = await import("#app/catch/catch-client");
+  const claims = await catchClaims();
+  const esc = (t: string) => t.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+  const label: Record<string, string> = {
+    awaiting_claim: "Reserved, claim at catchcrypt.com",
+    sending: "Sending",
+    sent: "Sent",
+    sent_dry: "Sent (test)",
+    void: "Unavailable",
+  };
+  const rows =
+    claims == null
+      ? "<p>Log in to see your cards.</p>"
+      : claims.length === 0
+        ? "<p>No cards yet. Wins and catches can drop one when your wallet is connected.</p>"
+        : `<table style="width:100%;border-collapse:collapse;text-align:left;font-size:20px" cellpadding="6"><tr><th>Card</th><th>Value</th><th>Status</th></tr>${claims
+            .map(
+              (c: any) =>
+                `<tr><td>${esc(String(c.card?.name ?? "?"))}</td><td>$${Number(c.card?.value ?? 0).toFixed(2)}</td><td>${esc(label[c.status] ?? c.status)}</td></tr>`,
+            )
+            .join("")}</table>`;
+  const d = el(`<div id="cc-claims" style="${box}"><h2 style="margin:0 0 8px">My Collector Crypt Cards</h2>${rows}
+    <button id="cc-claims-close" style="${btn};background:#555;color:#fff">Close (ESC)</button></div>`);
+  const close = () => {
+    d.remove();
+    window.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
+  window.addEventListener("keydown", onKey, true);
+  (d.querySelector("#cc-claims-close") as HTMLButtonElement).onclick = close;
+}

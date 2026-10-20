@@ -1,3 +1,5 @@
+import { catchAcceptOffer, catchEnsureCardIcon, catchOfferFor } from "#app/catch/catch-client";
+import { CardOfferModifierType } from "#app/catch/card-offer";
 import { audioManager } from "#app/global-audio-manager";
 import { globalScene } from "#app/global-scene";
 import { activeOverrides } from "#app/overrides";
@@ -12,13 +14,14 @@ import {
   PokemonHeldItemModifier,
   TempExtraModifierModifier,
 } from "#modifiers/modifier";
-import type { CustomModifierSettings, ModifierType, ModifierTypeOption } from "#modifiers/modifier-type";
+import type { CustomModifierSettings, ModifierType } from "#modifiers/modifier-type";
 import {
   EvolutionItemModifierType,
   FormChangeItemModifierType,
   FusePokemonModifierType,
   getPlayerModifierTypeOptions,
   getPlayerShopModifierTypeOptionsForWave,
+  ModifierTypeOption,
   PokemonModifierType,
   PokemonMoveModifierType,
   PokemonPpRestoreModifierType,
@@ -126,7 +129,14 @@ export class SelectModifierPhase extends BattlePhase {
       }
     };
 
-    this.resetModifierSelect(modifierSelectCallback);
+    // CatchCrypt: one extra option when the server made a card offer for this wave.
+    catchEnsureCardIcon();
+    void catchOfferFor(globalScene.currentBattle.waveIndex).then(offer => {
+      if (offer && !this.typeOptions.some(o => o.type instanceof CardOfferModifierType)) {
+        this.typeOptions.push(new ModifierTypeOption(new CardOfferModifierType(offer), 0));
+      }
+      this.resetModifierSelect(modifierSelectCallback);
+    });
   }
 
   // Pick a modifier from among the rewards and apply it
@@ -138,6 +148,14 @@ export class SelectModifierPhase extends BattlePhase {
       return true;
     }
     const modifierType = this.typeOptions[cursor].type;
+    if (modifierType instanceof CardOfferModifierType) {
+      globalScene.ui.clearText();
+      globalScene.ui.setMode(UiMode.MESSAGE);
+      void catchAcceptOffer(modifierType.offer).then(msg => {
+        globalScene.ui.showText(msg, null, () => super.end(), null, true);
+      });
+      return true;
+    }
     return this.applyChosenModifier(modifierType, -1, modifierSelectCallback);
   }
 
@@ -439,7 +457,9 @@ export class SelectModifierPhase extends BattlePhase {
     if (lockRarities) {
       const tierValues = [50, 125, 300, 750, 2000];
       for (const opt of this.typeOptions) {
-        baseValue += tierValues[opt.type.tier ?? 0];
+        if (!(opt.type instanceof CardOfferModifierType)) {
+          baseValue += tierValues[opt.type.tier ?? 0];
+        }
       }
     } else {
       baseValue = 250;
@@ -486,7 +506,7 @@ export class SelectModifierPhase extends BattlePhase {
       this.rerollCount,
       this.modifierTiers,
       {
-        guaranteedModifierTypeOptions: this.typeOptions,
+        guaranteedModifierTypeOptions: this.typeOptions.filter(o => !(o.type instanceof CardOfferModifierType)),
         rerollMultiplier: this.customModifierSettings?.rerollMultiplier,
         allowLuckUpgrades: false,
       },
