@@ -19,6 +19,8 @@ export class TownScene extends Phaser.Scene {
   private leaving = false;
   private rate = 0.15;
   private dir = "front";
+  private lockedMsgAt = 0;
+  private lockedText?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: KEY });
@@ -94,8 +96,11 @@ export class TownScene extends Phaser.Scene {
     const p = this.player;
     if (dx || dy) {
       const nx = p.x + dx, ny = p.y + dy, foot = ny + 14;
-      if (!this.blocked(nx - 10, foot) && !this.blocked(nx + 10, foot)) {
-        p.setPosition(Phaser.Math.Clamp(nx, 16, this.world.width - 16), Phaser.Math.Clamp(ny, 16, this.world.height - 16));
+      const atEdge = nx < 16 || ny < 16 || nx > this.world.width - 16 || ny > this.world.height - 16;
+      if (!atEdge && !this.blocked(nx - 10, foot) && !this.blocked(nx + 10, foot)) {
+        p.setPosition(nx, ny);
+      } else {
+        this.showLocked();
       }
       p.anims.play(`cc-${this.dir}`, true);
       this.checkGrass();
@@ -103,6 +108,25 @@ export class TownScene extends Phaser.Scene {
       p.anims.stop();
       p.setFrame(`misa-${this.dir}`);
     }
+  }
+
+  /** Throttled: at most once every 2.5 s. */
+  private showLocked() {
+    const now = this.time.now;
+    if (now - this.lockedMsgAt < 2500) {
+      return;
+    }
+    this.lockedMsgAt = now;
+    const cam = this.cameras.main;
+    const { width, height } = this.scale;
+    this.lockedText?.destroy();
+    this.lockedText = this.add
+      .text(width / 2, height / 2 + (height / 2 - 70) / cam.zoom, "You haven't unlocked this area yet.", {
+        fontFamily: "emerald, monospace", fontSize: "44px", color: "#ffffff", backgroundColor: "#1b2440cc", padding: { x: 20, y: 10 },
+      })
+      .setOrigin(0.5, 1).setScrollFactor(0).setDepth(100).setScale(1 / cam.zoom);
+    (window as any).__ccLockedShown = ((window as any).__ccLockedShown ?? 0) + 1;
+    this.time.delayedCall(1800, () => this.lockedText?.destroy());
   }
 
   private checkGrass() {
@@ -145,7 +169,9 @@ export function townEnabled(): boolean {
 
 /** Pause the battle scene, show the town, and call `resume` when the player walks into grass or presses Battle. */
 export function enterTown(battle: Phaser.Scene, resume: () => void): void {
+  const releaseKeys = () => (battle as any).inputController?.deactivatePressedKey?.();
   resumeCb = () => {
+    releaseKeys(); // keys held when the town opened never got a keyup in the paused scene
     battle.scene.resume();
     battle.scene.setVisible(true);
     (window as any).__ccInTown = false;
@@ -155,6 +181,7 @@ export function enterTown(battle: Phaser.Scene, resume: () => void): void {
   if (!mgr.getScene(KEY)) {
     mgr.add(KEY, TownScene, false);
   }
+  releaseKeys();
   battle.scene.pause();
   battle.scene.setVisible(false);
   (window as any).__ccScenes = () => mgr.getScenes(false).map(sc => `${sc.scene.key}:${sc.scene.isActive()}:${sc.scene.isVisible()}`);

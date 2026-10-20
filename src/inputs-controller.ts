@@ -31,6 +31,8 @@ import { getEnumValues } from "#utils/enums";
 import Phaser from "phaser";
 
 const repeatInputDelayMillis = 250;
+/** CatchCrypt: buttons that never auto-repeat while held. */
+const NO_REPEAT = new Set<Button>([Button.ACTION, Button.SUBMIT, Button.CANCEL, Button.MENU]);
 
 /**
  * Manages and handles all input controls for the game, including keyboard and gamepad interactions.
@@ -367,6 +369,9 @@ export class InputsController {
           button: buttonDown,
         });
       }, repeatInputDelayMillis);
+      if (NO_REPEAT.has(buttonDown)) {
+        clearInterval(this.inputInterval[buttonDown]); // CatchCrypt: confirm/cancel act on fresh presses only
+      }
       this.buttonLock.push(buttonDown);
     }
   }
@@ -439,6 +444,9 @@ export class InputsController {
           button: buttonDown,
         });
       }, repeatInputDelayMillis);
+      if (NO_REPEAT.has(buttonDown)) {
+        clearInterval(this.inputInterval[buttonDown]); // CatchCrypt: confirm/cancel act on fresh presses only
+      }
       this.buttonLock.push(buttonDown);
     }
   }
