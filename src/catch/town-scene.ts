@@ -4,6 +4,8 @@
  * Movement is a small grid-free walker with tile collision, modeled on that repo's Player.js.
  */
 import { globalScene } from "#app/global-scene";
+import { PartyUiMode } from "#enums/party-ui-mode";
+import { UiMode } from "#enums/ui-mode";
 import Phaser from "phaser";
 
 const KEY = "catchcrypt_town";
@@ -11,6 +13,8 @@ const TILE_COLLIDES = "collides";
 let resumeCb: (() => void) | null = null;
 let lastPos: { x: number; y: number } | null = null;
 let lastArea: AreaId = "town";
+let battleRef: Phaser.Scene | null = null;
+const releaseBattleKeys = () => (battleRef as any)?.inputController?.deactivatePressedKey?.();
 
 type Dir = "north" | "south" | "east" | "west";
 type AreaId = "town" | "route1" | "beach" | "cave";
@@ -103,6 +107,10 @@ export class TownScene extends Phaser.Scene {
   private keys!: Record<"up" | "down" | "left" | "right" | "w" | "a" | "s" | "d", Phaser.Input.Keyboard.Key>;
   private leaving = false;
   private switching = false;
+  private partyOpen = false;
+  private grassAt: (tx: number, ty: number) => boolean = () => false;
+  private lastTileKey = "";
+  private grassReadyAt = 0;
   private dir = "front";
   private lockedMsgAt = 0;
   private lockedText?: Phaser.GameObjects.Text;
@@ -146,6 +154,8 @@ export class TownScene extends Phaser.Scene {
       }
     }
     const cam = this.cameras.main;
+    this.lastTileKey = "";
+    this.grassReadyAt = this.time.now + 1500;
     cam.setZoom(2).setBounds(0, 0, this.mapW, this.mapH).startFollow(this.player, true);
     cam.fadeIn(250, 0, 0, 0);
     const kb = this.input.keyboard!;
@@ -158,10 +168,20 @@ export class TownScene extends Phaser.Scene {
     btn.setScale(1 / cam.zoom).setPosition(width / 2 + (width / 2 - 20) / cam.zoom, height / 2 + (height / 2 - 20) / cam.zoom);
     btn.setName("battle-button");
     btn.on("pointerdown", () => this.leave("button"));
+    const pbtn = this.add
+      .text(0, 0, "\u25D3 Pokémon", { fontFamily: "emerald, monospace", fontSize: "48px", color: "#ffffff", backgroundColor: "#2b6cb0", padding: { x: 24, y: 12 } })
+      .setOrigin(1, 1).setScrollFactor(0).setDepth(100).setInteractive({ useHandCursor: true }).setName("party-button");
+    pbtn.setScale(1 / cam.zoom).setPosition(btn.x - btn.displayWidth - 6 / cam.zoom, btn.y);
+    pbtn.on("pointerdown", () => this.openParty());
+    kb.on("keydown-P", () => this.openParty());
     kb.on("keydown-B", () => this.leave("button"));
-    kb.on("keydown-ESC", () => this.leave("button"));
+    kb.on("keydown-ESC", () => {
+      if (!this.partyOpen) {
+        this.leave("button");
+      }
+    });
     this.add
-      .text(width / 2 - (width / 2 - 20) / cam.zoom, height / 2 + (height / 2 - 20) / cam.zoom, "Arrows or WASD to walk.  Battle, B or Esc for the next wave.", {
+      .text(width / 2 - (width / 2 - 20) / cam.zoom, height / 2 + (height / 2 - 20) / cam.zoom, "Arrows or WASD to walk.  P for your Pokémon.  Battle, B or Esc for the next wave.", {
         fontFamily: "emerald, monospace", fontSize: "36px", color: "#ffffff", backgroundColor: "#1b2440cc", padding: { x: 16, y: 8 },
       })
       .setOrigin(0, 1).setScrollFactor(0).setDepth(100).setScale(1 / cam.zoom).setName("town-hint");
@@ -190,7 +210,8 @@ export class TownScene extends Phaser.Scene {
     const map = this.make.tilemap({ key: "cc_route1" });
     const ts = map.addTilesetImage("tuxmon-sample-32px-extruded", "cc_tiles")!;
     const below = map.createLayer("Below Player", ts, 0, 0)!;
-    map.createLayer("Grass", ts, 0, 0);
+    const grass = map.createLayer("Grass", ts, 0, 0);
+    this.grassAt = (tx, ty) => !!grass?.getTileAt(tx, ty);
     const world = map.createLayer("World", ts, 0, 0)!;
     map.createLayer("Above Player", ts, 0, 0)?.setDepth(10);
     // Open the east wall (cave) and the west wall (not built yet) with a short path.
@@ -255,6 +276,7 @@ export class TownScene extends Phaser.Scene {
     this.mapW = a.w * 32;
     this.mapH = a.h * 32;
     this.solidAt = (tx, ty) => a.solid[ty]?.[tx] ?? true;
+    this.grassAt = (tx, ty) => a.deco[ty]?.[tx] === T.tall;
     return a.spawn[from ?? (Object.keys(AREAS[id].exits)[0] as Dir)];
   }
 
@@ -263,7 +285,7 @@ export class TownScene extends Phaser.Scene {
   }
 
   update(_t: number, dtMs: number) {
-    if (this.leaving || this.switching) {
+    if (this.leaving || this.switching || this.partyOpen) {
       return;
     }
     const k = this.keys;
@@ -281,11 +303,31 @@ export class TownScene extends Phaser.Scene {
         this.tryExit(edge);
       } else if (!this.blocked(nx - 10, foot) && !this.blocked(nx + 10, foot)) {
         p.setPosition(nx, ny);
+        this.grassStep(p.x, p.y + 14);
       }
       p.anims.play(`cc-${this.dir}`, true);
     } else {
       p.anims.stop();
       p.setFrame(`misa-${this.dir}`);
+    }
+  }
+
+  /** Classic tall grass: each new grass tile stepped on has about a 1 in 10 chance to start the next wave. */
+  private grassStep(x: number, y: number) {
+    const tx = Math.floor(x / 32), ty = Math.floor(y / 32), key = `${tx},${ty}`;
+    if (key === this.lastTileKey) {
+      return;
+    }
+    this.lastTileKey = key;
+    if (!this.grassAt(tx, ty) || this.time.now < this.grassReadyAt) {
+      return;
+    }
+    const w = window as any;
+    w.__ccGrassSteps = (w.__ccGrassSteps ?? 0) + 1;
+    const chance = typeof w.__ccGrassChance === "number" ? w.__ccGrassChance : 0.1;
+    if (Math.random() < chance) {
+      w.__ccGrassBattle = (w.__ccGrassBattle ?? 0) + 1;
+      this.leave("button");
     }
   }
 
@@ -326,9 +368,43 @@ export class TownScene extends Phaser.Scene {
     this.time.delayedCall(1800, () => this.lockedText?.destroy());
   }
 
+  /** Show PokeRogue's own party screen (check mode: summary, moves, reorder) over a paused town. */
+  openParty() {
+    if (this.leaving || this.switching || this.partyOpen || !battleRef) {
+      return;
+    }
+    this.partyOpen = true;
+    (window as any).__ccPartyOpen = true;
+    this.input.keyboard?.resetKeys();
+    this.player.anims.stop();
+    const battle = battleRef;
+    this.scene.pause();
+    this.scene.setVisible(false);
+    battle.scene.resume();
+    battle.scene.setVisible(true);
+    releaseBattleKeys();
+    globalScene.ui.setMode(UiMode.PARTY, PartyUiMode.CHECK, -1, () => {
+      // Called once, when the player backs out of the party screen.
+      globalScene.ui.setMode(UiMode.MESSAGE).then(() => {
+        globalScene.ui.clearText?.();
+        releaseBattleKeys();
+        battle.scene.pause();
+        battle.scene.setVisible(false);
+        this.scene.resume();
+        this.scene.setVisible(true);
+        this.input.keyboard?.resetKeys();
+        // ignore the key that closed the party for a moment so it cannot also start the battle
+        this.time.delayedCall(500, () => {
+          this.partyOpen = false;
+          (window as any).__ccPartyOpen = false;
+        });
+      });
+    });
+  }
+
   /** Leave town and hand control back to PokeRogue's encounter. Only Battle, B or Esc do this. */
   leave(_why: "button") {
-    if (this.leaving || this.switching) {
+    if (this.leaving || this.switching || this.partyOpen) {
       return;
     }
     this.leaving = true;
@@ -351,6 +427,7 @@ export function townEnabled(): boolean {
 
 /** Pause the battle scene, show the town, and call `resume` when the player presses Battle, B or Esc. */
 export function enterTown(battle: Phaser.Scene, resume: () => void): void {
+  battleRef = battle;
   const releaseKeys = () => (battle as any).inputController?.deactivatePressedKey?.();
   resumeCb = () => {
     releaseKeys(); // keys held when the town opened never got a keyup in the paused scene
@@ -359,6 +436,7 @@ export function enterTown(battle: Phaser.Scene, resume: () => void): void {
     (window as any).__ccInTown = false;
     resume();
   };
+  battleRef = battle;
   const mgr = battle.game.scene;
   releaseKeys();
   battle.scene.pause();
