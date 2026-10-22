@@ -22,7 +22,7 @@ function extraHeaders(): Record<string, string> {
 export interface CardOffer {
   id: string;
   wave: number;
-  card: { name: string; value: number };
+  card: { name: string; value: number; image?: string | null };
   status: string;
 }
 const offers = new Map<number, CardOffer>();

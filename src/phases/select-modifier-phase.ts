@@ -63,11 +63,33 @@ export class SelectModifierPhase extends BattlePhase {
     this.isCopy = isCopy;
   }
 
+  private ccOfferChecked = false;
+
   start() {
     super.start();
 
     if (!this.isPlayer()) {
       return false;
+    }
+
+    // CatchCrypt: a server card offer replaces the whole reward screen with the card drop scene.
+    if (!this.rerollCount && !this.isCopy && !this.ccOfferChecked) {
+      this.ccOfferChecked = true;
+      globalScene.ui.setMode(UiMode.MESSAGE);
+      void catchOfferFor(globalScene.currentBattle.waveIndex).then(async offer => {
+        if (!offer) {
+          this.start();
+          return;
+        }
+        const { showCardDrop } = await import("#app/catch/card-drop");
+        const m = await showCardDrop(offer);
+        if (m) {
+          globalScene.ui.showText(m, null, () => super.end(), null, true);
+        } else {
+          super.end();
+        }
+      });
+      return;
     }
 
     if (!this.rerollCount && !this.isCopy) {
