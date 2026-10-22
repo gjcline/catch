@@ -360,17 +360,35 @@ export function enterTown(battle: Phaser.Scene, resume: () => void): void {
     resume();
   };
   const mgr = battle.game.scene;
-  if (!mgr.getScene(KEY)) {
-    mgr.add(KEY, TownScene, false);
-  }
   releaseKeys();
   battle.scene.pause();
   battle.scene.setVisible(false);
   (window as any).__ccScenes = () => mgr.getScenes(false).map(sc => `${sc.scene.key}:${sc.scene.isActive()}:${sc.scene.isVisible()}`);
   (window as any).__ccInTown = true;
-  if (mgr.isActive(KEY) || mgr.isVisible(KEY)) {
-    mgr.stop(KEY); // CatchCrypt: never stack a second town start on a half started one
+  // Phaser defers scene.add() while its scene manager is processing (a Continue from a save opens the town
+  // from inside the game loop). A direct start() then finds no scene and the screen stays black.
+  // autoStart covers both cases: immediate add, or start once the pending add is processed.
+  const existing = mgr.getScene(KEY);
+  if (existing) {
+    if (existing.sys.isActive() || existing.sys.isVisible()) {
+      mgr.stop(KEY); // never stack a second town start on a half started one
+    }
+    mgr.start(KEY);
+  } else {
+    mgr.add(KEY, TownScene, true);
   }
-  mgr.start(KEY);
   mgr.bringToTop(KEY);
+  // Safety net: if the town never started, skip it and go straight to the battle.
+  setTimeout(() => {
+    const sc = mgr.getScene(KEY);
+    if (resumeCb && (!sc || sc.sys.settings.status <= Phaser.Scenes.INIT)) {
+      console.warn("CatchCrypt: town did not start, continuing to the battle");
+      const cb = resumeCb;
+      resumeCb = null;
+      if (sc) {
+        mgr.stop(KEY);
+      }
+      cb();
+    }
+  }, 4000);
 }
