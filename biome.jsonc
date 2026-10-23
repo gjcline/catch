@@ -333,6 +333,16 @@
       }
     },
     {
+      "includes": ["presence/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["scripts/**/*"],
       "linter": {
         "rules": {

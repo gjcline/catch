@@ -17,6 +17,8 @@ interface ImportMetaEnv {
   readonly VITE_DISCORD_CLIENT_ID?: string;
   readonly VITE_GOOGLE_CLIENT_ID?: string;
   readonly VITE_I18N_DEBUG?: "0" | "1";
+  /** Socket.IO presence for the between-wave town. Empty keeps the town solo. */
+  readonly VITE_CATCH_PRESENCE_URL?: string;
   readonly VITE_WIKI_URL: string;
   readonly VITE_DISCORD_URL: string;
   readonly VITE_GITHUB_URL: string;

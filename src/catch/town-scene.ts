@@ -3,7 +3,9 @@
  * Map, tileset and player sprite: aaron5670/PokeMMO-Online-Realtime-Multiplayer-Game (WTFPL), see CREDITS.md.
  * Movement is a small grid-free walker with tile collision, modeled on that repo's Player.js.
  */
+import { loggedInUser } from "#app/account";
 import { AREAS, type AreaId, type BuiltMap, buildOverworld, type Dir, tiledFromCache } from "#app/catch/town-maps";
+import { type Facing, type PresenceMove, type PresencePeer, TownPresence } from "#app/catch/town-presence";
 import { globalScene } from "#app/global-scene";
 import { PartyUiMode } from "#enums/party-ui-mode";
 import { UiMode } from "#enums/ui-mode";
@@ -48,9 +50,14 @@ export class TownScene extends Phaser.Scene {
   private grassAt: (tx: number, ty: number) => boolean = () => false;
   private lastTileKey = "";
   private grassReadyAt = 0;
-  private dir = "front";
+  private dir: Facing = "front";
   private lockedMsgAt = 0;
   private lockedText?: Phaser.GameObjects.Text;
+  private readonly remotes = new Map<string, Phaser.GameObjects.Sprite>();
+  private readonly remoteLabels = new Map<string, Phaser.GameObjects.Text>();
+  private presence: TownPresence | null = null;
+  /** Keep the socket across an area restart. Leave and shutdown still disconnect. */
+  private retainPresence = false;
 
   constructor() {
     super({ key: KEY });
@@ -74,6 +81,7 @@ export class TownScene extends Phaser.Scene {
       // A throw here used to leave the battle paused and hidden: solid black, no buttons.
       console.error("CatchCrypt: town failed to start", err);
       this.leaving = true;
+      this.releasePresence();
       this.time.delayedCall(0, () => {
         const cb = resumeCb;
         resumeCb = null;
@@ -84,8 +92,10 @@ export class TownScene extends Phaser.Scene {
   }
 
   private boot(data?: { area?: AreaId; from?: Dir }) {
+    this.bindPresenceLifecycle();
     this.leaving = false;
     this.switching = false;
+    this.clearRemotes();
     this.area = data?.area ?? lastArea;
     lastArea = this.area;
     const built = buildOverworld(this.area, tiledFromCache(this.cache.tilemap.get("cc_town")));
@@ -176,6 +186,7 @@ export class TownScene extends Phaser.Scene {
       .setName("town-hint");
     this.showBanner();
     (window as any).__ccArea = this.area;
+    this.attachPresence();
   }
 
   /** Area name card, using PokeRogue's own biome art for the generated areas. */
@@ -332,6 +343,7 @@ export class TownScene extends Phaser.Scene {
         this.tryExit(edge);
       } else if (!this.blocked(nx - 10, foot) && !this.blocked(nx + 10, foot)) {
         p.setPosition(nx, ny);
+        this.emitPresence();
         this.grassStep(p.x, p.y + 14);
       }
       p.anims.play(`cc-${this.dir}`, true);
@@ -374,6 +386,8 @@ export class TownScene extends Phaser.Scene {
       return;
     }
     this.switching = true;
+    this.retainPresence = true;
+    this.clearRemotes();
     lastPos = null;
     this.cameras.main.fadeOut(200, 0, 0, 0);
     this.time.delayedCall(220, () => this.scene.restart({ area: exit.to, from: OPP[edge] }));
@@ -446,6 +460,7 @@ export class TownScene extends Phaser.Scene {
       return;
     }
     this.leaving = true;
+    this.releasePresence();
     lastPos = { x: this.player.x, y: this.player.y };
     lastArea = this.area;
     (window as any).__ccTownLeft = _why;
@@ -456,6 +471,152 @@ export class TownScene extends Phaser.Scene {
       this.scene.stop();
       cb?.();
     });
+  }
+
+  /** Disconnect only when the scene is really going away. Area restarts set retainPresence. */
+  private bindPresenceLifecycle() {
+    this.events.once("shutdown", () => {
+      const retain = this.retainPresence;
+      this.retainPresence = false;
+      this.clearRemotes();
+      if (!retain) {
+        this.releasePresence();
+      }
+    });
+  }
+
+  private attachPresence() {
+    try {
+      if (!this.presence || this.presence.isClosed()) {
+        this.presence = new TownPresence({
+          spawn: peer => this.spawnRemote(peer),
+          move: step => this.moveRemote(step),
+          leave: id => this.removeRemote(id),
+        });
+      }
+      this.presence.hello({
+        name: this.presenceName(),
+        x: this.player.x,
+        y: this.player.y,
+        facing: this.dir,
+        sprite: "misa",
+        area: this.area,
+      });
+    } catch (err) {
+      console.error("CatchCrypt: presence skipped", err);
+    }
+  }
+
+  private presenceName(): string {
+    try {
+      const custom = localStorage.getItem("cc_presence_name");
+      if (custom && custom.trim().length > 0) {
+        return custom.trim();
+      }
+    } catch {
+      // Storage can throw in private modes. The account name still works.
+    }
+    const username = loggedInUser?.username?.trim();
+    return username && username.length > 0 ? username : "Guest";
+  }
+
+  /** Throttled inside TownPresence. Skipped while the party screen or an area fade has update() paused. */
+  private emitPresence() {
+    this.presence?.move({
+      x: this.player.x,
+      y: this.player.y,
+      facing: this.dir,
+      area: this.area,
+    });
+  }
+
+  private spawnRemote(peer: PresencePeer) {
+    if (this.leaving || this.switching || peer.area !== this.area) {
+      return;
+    }
+    let sprite = this.remotes.get(peer.id);
+    if (sprite?.active) {
+      this.remoteLabels.get(peer.id)?.setText(peer.name);
+    } else {
+      sprite = this.add.sprite(peer.x, peer.y, "cc_player", `misa-${peer.facing}`).setDepth(5);
+      this.remotes.set(peer.id, sprite);
+      const label = this.add
+        .text(peer.x, peer.y - 22, peer.name, {
+          fontFamily: "emerald, monospace",
+          fontSize: "14px",
+          color: "#ffffff",
+          backgroundColor: "#1b2440cc",
+          padding: { x: 4, y: 1 },
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(6);
+      this.remoteLabels.set(peer.id, label);
+    }
+    this.placeRemote(peer.id, peer.x, peer.y, peer.facing);
+    (window as any).__ccPresencePeers = this.remotes.size;
+  }
+
+  private moveRemote(step: PresenceMove) {
+    if (this.leaving || this.switching || step.area !== this.area || !this.remotes.get(step.id)?.active) {
+      return;
+    }
+    this.placeRemote(step.id, step.x, step.y, step.facing);
+  }
+
+  private placeRemote(id: string, x: number, y: number, facing: Facing) {
+    const sprite = this.remotes.get(id);
+    if (!sprite?.active) {
+      return;
+    }
+    const moved = Math.hypot(sprite.x - x, sprite.y - y) > 0.5;
+    sprite.setPosition(x, y);
+    if (moved) {
+      sprite.anims.play(`cc-${facing}`, true);
+      const prev = sprite.getData("ccStop") as Phaser.Time.TimerEvent | undefined;
+      prev?.remove(false);
+      sprite.setData(
+        "ccStop",
+        this.time.delayedCall(140, () => {
+          if (!sprite.active) {
+            return;
+          }
+          sprite.anims.stop();
+          sprite.setFrame(`misa-${facing}`);
+        }),
+      );
+    } else {
+      sprite.anims.stop();
+      sprite.setFrame(`misa-${facing}`);
+    }
+    this.remoteLabels.get(id)?.setPosition(x, y - 22);
+  }
+
+  private removeRemote(id: string) {
+    const sprite = this.remotes.get(id);
+    if (sprite?.active) {
+      const timer = sprite.getData("ccStop") as Phaser.Time.TimerEvent | undefined;
+      timer?.remove(false);
+      sprite.destroy();
+    }
+    const label = this.remoteLabels.get(id);
+    if (label?.active) {
+      label.destroy();
+    }
+    this.remotes.delete(id);
+    this.remoteLabels.delete(id);
+    (window as any).__ccPresencePeers = this.remotes.size;
+  }
+
+  private clearRemotes() {
+    for (const id of [...this.remotes.keys()]) {
+      this.removeRemote(id);
+    }
+  }
+
+  private releasePresence() {
+    this.clearRemotes();
+    this.presence?.disconnect();
+    this.presence = null;
   }
 }
 

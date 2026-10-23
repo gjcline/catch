@@ -44,7 +44,8 @@
     "update-submodules:remote": "pnpm update-submodules --remote",
     "sample-movesets": "vite-node scripts/gen-moveset/gen-moveset-driver.ts",
     "game-data:export": "vitest run --config scripts/game-data-exporter/game-data-exporter.config.ts scripts/game-data-exporter/run.test.ts --",
-    "build:catchcrypt": "vite build && node catchcrypt/postbuild.mjs"
+    "build:catchcrypt": "vite build && node catchcrypt/postbuild.mjs",
+    "test:presence": "pnpm --dir presence --ignore-workspace test"
   },
   "dependencies": {
     "@material/material-color-utilities": "^0.4.0",
@@ -57,6 +58,7 @@
     "i18next-korean-postposition-processor": "^1.0.0",
     "jszip": "^3.10.2",
     "phaser": "^3.90.0",
+    "socket.io-client": "^4.8.1",
     "phaser3-rex-plugins": "^1.80.20"
   },
   "devDependencies": {
