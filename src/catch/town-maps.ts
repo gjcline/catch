@@ -942,9 +942,49 @@ const TOWN_H = 72;
 
 const COTTAGE: Rect = { x: 4, y: 30, w: 8, h: 6 };
 
+/** Used when town.json never reached the Phaser cache (404 on a git deploy). Still walkable, same gates. */
+function buildTownFallback(): BuiltMap {
+  return buildScenic({
+    w: TOWN_W,
+    h: TOWN_H,
+    mouths: [
+      { dir: "north", at: 49, len: 6, label: "Route 1  Lv 8" },
+      { dir: "south", at: 35, len: 6, label: "Beach  Lv 10" },
+      { dir: "east", at: 33, len: 4, label: "Cave  Lv 10" },
+      { dir: "west", at: 33, len: 5, label: "Grove" },
+    ],
+    trails: [
+      [
+        { x: 52, y: 4 },
+        { x: 52, y: 36 },
+        { x: 38, y: 36 },
+        { x: 38, y: 68 },
+      ],
+      [
+        { x: 4, y: 35 },
+        { x: 72, y: 35 },
+      ],
+    ],
+    trailWidth: 4,
+    rooms: [{ x: 30, y: 28, w: 16, h: 12 }],
+    grass: [
+      { x: 8, y: 8, w: 10, h: 6 },
+      { x: 58, y: 8, w: 10, h: 6 },
+      { x: 8, y: 56, w: 12, h: 6 },
+      { x: 56, y: 56, w: 10, h: 6 },
+    ],
+    treeDensity: 30,
+    salt: 3,
+    border: "tree",
+    extraLabels: [{ x: 34, y: 32, label: "Town Square", blocking: false }],
+    defaultDir: "south",
+    flowers: true,
+  });
+}
+
 function buildTown(town: TiledMap | null): BuiltMap {
   if (!town) {
-    throw new Error("CatchCrypt town map failed to load");
+    return buildTownFallback();
   }
   const d = new Draft(TOWN_W, TOWN_H);
   d.collides = collisionSet(town);

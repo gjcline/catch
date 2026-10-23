@@ -5,10 +5,7 @@ import { eventBus } from "#app/event-bus";
 import { timedEventManager } from "#app/global-event-manager";
 import { globalScene } from "#app/global-scene";
 import { settings } from "#app/global-settings-manager";
-import { speciesDataRegistry } from "#app/global-species-data-registry";
 import { bypassLogin, isBeta, isDev } from "#constants/app-constants";
-import { getSplashMessages } from "#data/splash-messages";
-import { SpeciesId } from "#enums/species-id";
 import { TextStyle } from "#enums/text-style";
 import { UiMode } from "#enums/ui-mode";
 import { version } from "#package.json";
@@ -16,12 +13,11 @@ import type { SettingsUpdateEventArgs } from "#types/event-bus-types";
 import { TimedEventDisplay } from "#ui/event-display";
 import { OptionSelectUiHandler } from "#ui/option-select-ui-handler";
 import { addTextObject } from "#ui/text";
-import { fixedInt, randInt, randItem } from "#utils/common";
-import { getEnumValues } from "#utils/enums";
-import i18next, { type TOptions } from "i18next";
+import { fixedInt, randInt } from "#utils/common";
+import i18next from "i18next";
 
-/** If the stats can not be retrieved, use this fallback value */
-const BATTLES_WON_FALLBACK = -1;
+/** Title tagline. Upstream splash lines (and the October Skeledirge one) stay off this screen. */
+const CATCHCRYPT_TAGLINE = "Catch, battle, and earn cards.";
 
 export class TitleUiHandler extends OptionSelectUiHandler {
   private titleContainer: Phaser.GameObjects.Container;
@@ -31,8 +27,6 @@ export class TitleUiHandler extends OptionSelectUiHandler {
   private appVersionText: Phaser.GameObjects.Text;
   private snow: Phaser.GameObjects.TileSprite;
   private splashMessageText: Phaser.GameObjects.Text;
-
-  private splashMessage: string;
 
   private titleStatsTimer: NodeJS.Timeout | null;
 
@@ -132,40 +126,12 @@ export class TitleUiHandler extends OptionSelectUiHandler {
           return;
         }
         this.playerCountLabel.setText(`${stats.playerCount} ${i18next.t("menu:playersOnline")}`);
-        const splashMessage = this.splashMessage;
-        if (splashMessage === "splashMessages:battlesWon") {
-          this.splashMessageText.setText(i18next.t(splashMessage, { count: stats.battleCount }));
-        }
       })
       .catch(err => {
         if (!bypassLogin) {
           console.error("Failed to fetch title stats:\n", err);
         }
       });
-  }
-
-  private getSplashMessageI18nParams(): TOptions & Record<string, unknown> {
-    switch (this.splashMessage) {
-      case "splashMessages:battlesWon":
-        return { count: BATTLES_WON_FALLBACK };
-      case "splashMessages:itsBeenTotalRuns":
-        return { cycleCountNoOrdinal: 5643853 + globalScene.gameData.gameStats.classicSessionsPlayed };
-      case "splashMessages:aprilFools.helloKyleAmber": {
-        const trainerName = settings.isPlayerFemale ? "trainerNames:playerF" : "trainerNames:playerM";
-        return { name: i18next.t(trainerName) };
-      }
-      case "splashMessages:underratedPokemon":
-      case "splashMessages:dontTalkAboutThePokemonIncident":
-      case "splashMessages:aWildPokemonAppeared":
-      case "splashMessages:aprilFools.removedPokemon": {
-        const randSpeciesId = randItem(getEnumValues(SpeciesId));
-        const species = speciesDataRegistry.getSpecies(randSpeciesId);
-        const pokemonName = randSpeciesId > 2000 ? species.getFormNameToDisplay(0, true) : species.name;
-        return { pokemonName };
-      }
-    }
-
-    return {};
   }
 
   public override show(args: any[]): boolean {
@@ -193,8 +159,7 @@ export class TitleUiHandler extends OptionSelectUiHandler {
       this.playerCountLabel.setY(UPPER_LABEL);
     }
 
-    this.splashMessage = randItem(getSplashMessages());
-    this.splashMessageText.setText(i18next.t(this.splashMessage, this.getSplashMessageI18nParams()));
+    this.splashMessageText.setText(CATCHCRYPT_TAGLINE);
 
     const betaText = isBeta || isDev ? " (Beta)" : "";
     this.appVersionText.setText("v" + version + betaText);

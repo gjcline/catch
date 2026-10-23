@@ -68,6 +68,22 @@ export class TownScene extends Phaser.Scene {
   }
 
   create(data?: { area?: AreaId; from?: Dir }) {
+    try {
+      this.boot(data);
+    } catch (err) {
+      // A throw here used to leave the battle paused and hidden: solid black, no buttons.
+      console.error("CatchCrypt: town failed to start", err);
+      this.leaving = true;
+      this.time.delayedCall(0, () => {
+        const cb = resumeCb;
+        resumeCb = null;
+        this.scene.stop();
+        cb?.();
+      });
+    }
+  }
+
+  private boot(data?: { area?: AreaId; from?: Dir }) {
     this.leaving = false;
     this.switching = false;
     this.area = data?.area ?? lastArea;
@@ -206,7 +222,10 @@ export class TownScene extends Phaser.Scene {
   /** Blit a built map. Same tileset margin and spacing the generated areas already used. */
   private paint(built: BuiltMap) {
     const map = this.make.tilemap({ tileWidth: 32, tileHeight: 32, width: built.w, height: built.h });
-    const ts = map.addTilesetImage("cc_tiles", "cc_tiles", 32, 32, 1, 2, 0)!;
+    const ts = map.addTilesetImage("cc_tiles", "cc_tiles", 32, 32, 1, 2, 0);
+    if (!ts) {
+      throw new Error("CatchCrypt tileset failed to load");
+    }
     const ground = map.createBlankLayer("g", ts)!;
     const grass = map.createBlankLayer("grass", ts)!;
     const world = map.createBlankLayer("w", ts)!;
@@ -479,7 +498,10 @@ export function enterTown(battle: Phaser.Scene, resume: () => void): void {
   // Safety net: if the town never started, skip it and go straight to the battle.
   setTimeout(() => {
     const sc = mgr.getScene(KEY);
-    if (resumeCb && (!sc || sc.sys.settings.status <= Phaser.Scenes.INIT)) {
+    // CREATING means create() threw and Phaser never reached RUNNING, which the old INIT check missed.
+    const status = sc?.sys.settings.status;
+    const stuck = !sc || status <= Phaser.Scenes.INIT || status === Phaser.Scenes.CREATING;
+    if (resumeCb && stuck) {
       console.warn("CatchCrypt: town did not start, continuing to the battle");
       const cb = resumeCb;
       resumeCb = null;
