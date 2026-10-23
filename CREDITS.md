@@ -775,6 +775,7 @@ and [everyone else](https://github.com/pagefaultgames/pokerogue/graphs/contribut
 - Ydarissep (Creator of the now defunct "Yda's Dex")
 
 ## CatchCrypt town map
-Overworld map (route1), tuxmon tileset and player sprite atlas, plus the movement and tall grass encounter approach, come from
+Overworld maps (town and route1), tuxmon tileset and player sprite atlas, plus the movement and tall grass encounter approach, come from
 [aaron5670/PokeMMO-Online-Realtime-Multiplayer-Game](https://github.com/aaron5670/PokeMMO-Online-Realtime-Multiplayer-Game), licensed WTFPL
 (see `catchcrypt/public/town/LICENSE-WTFPL.txt`). Tuxmon tileset by the Tuxemon project contributors as distributed in that repo.
+The walkable town stamps that town layout and adds districts around it; Route 1, the deep forest, and the grove are generated from the same tiles.
