@@ -7,11 +7,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { clearLine, moveCursor } from "node:readline";
 import chalk from "chalk";
 import type { Logger, Plugin as VitePlugin } from "vite";
+import { applyCatchcryptBrand } from "../../catchcrypt/brand.mjs";
 
 const NAME = "minify-public-json-files";
 const VERSION = "3.1.1";
@@ -36,6 +37,52 @@ function skipExcludes(file: string): boolean {
   return EXCLUDE_PATTERNS.some(pattern => file.includes(pattern));
 }
 
+/**
+ * Copy a public directory into the Vite build output, minifying JSON on the way.
+ * Returns how many JSON files were minified.
+ *
+ * CatchCrypt town art lives in `catchcrypt/public`, not the assets submodule.
+ * Vercel git deploys run `vite build` and do not run `catchcrypt/postbuild.mjs`,
+ * so this has to happen here or `/town/*` 404s and the town scene stays black.
+ */
+export function stagePublicFiles(
+  srcDir: string,
+  outputDir: string,
+  onDir: (fullPath: string) => void = () => undefined,
+  onFail: (fullPath: string, err: unknown) => void = () => undefined,
+): number {
+  if (!existsSync(srcDir)) {
+    return 0;
+  }
+  let jsonCount = 0;
+  mkdirSync(outputDir, { recursive: true });
+  for (const file of readdirSync(srcDir)) {
+    if (skipExcludes(file)) {
+      continue;
+    }
+    const fullPath = join(srcDir, file);
+    const outputFilePath = join(outputDir, file);
+    if (statSync(fullPath).isDirectory()) {
+      onDir(fullPath);
+      jsonCount += stagePublicFiles(fullPath, outputFilePath, onDir, onFail);
+      continue;
+    }
+    if (file.endsWith(".json")) {
+      try {
+        const content = readFileSync(fullPath, "utf-8");
+        writeFileSync(outputFilePath, JSON.stringify(JSON.parse(content)), "utf-8");
+        jsonCount++;
+      } catch (err) {
+        copyFileSync(fullPath, outputFilePath);
+        onFail(fullPath, err);
+      }
+      continue;
+    }
+    copyFileSync(fullPath, outputFilePath);
+  }
+  return jsonCount;
+}
+
 /** Vite plugin to minify JSON files. Non-JSON files are copied as-is. */
 export function minifyPublicJsonFiles(): VitePlugin {
   let logger: Logger;
@@ -49,53 +96,20 @@ export function minifyPublicJsonFiles(): VitePlugin {
     }
   };
 
-  const minifyFile = (fullPath: string, outputFilePath: string): void => {
-    try {
-      const content = readFileSync(fullPath, "utf-8");
-      const minifiedContent = JSON.stringify(JSON.parse(content));
-      writeFileSync(outputFilePath, minifiedContent, "utf-8");
-      count++;
-    } catch (err) {
-      copyFileSync(fullPath, outputFilePath);
-      const error = new Error(`Failed to minify JSON file: ${fullPath}\n\t→ ${err.message}`);
-      error.stack = err.stack;
-      errors.push(error);
-    }
-  };
-
   const minifyJsonFiles = (dir: string, outDir: string): void => {
-    const files = readdirSync(dir);
-
-    for (const file of files) {
-      const fullPath = join(dir, file);
-      const outputFilePath = join(outDir, file);
-      const stat = statSync(fullPath);
-
-      if (skipExcludes(file)) {
-        clearTerminalLine();
-        logger.info(yellow(`Skipping "${fullPath}".`));
-        continue;
-      }
-
-      if (stat.isDirectory()) {
+    count += stagePublicFiles(
+      dir,
+      outDir,
+      fullPath => {
         clearTerminalLine();
         logger.info(green(`Processing directory "${fullPath}".`));
-
-        // Recurse into subdirectories
-        const nestedOutputDir = join(outDir, file);
-        mkdirSync(nestedOutputDir, { recursive: true });
-        minifyJsonFiles(fullPath, nestedOutputDir);
-        continue;
-      }
-
-      if (file.endsWith(".json")) {
-        minifyFile(fullPath, outputFilePath);
-        continue;
-      }
-
-      // Copy other files as-is
-      copyFileSync(fullPath, outputFilePath);
-    }
+      },
+      (fullPath, err) => {
+        const error = new Error(`Failed to minify JSON file: ${fullPath}\n\t→ ${(err as Error).message}`);
+        error.stack = (err as Error).stack;
+        errors.push(error);
+      },
+    );
   };
 
   return {
@@ -121,6 +135,18 @@ export function minifyPublicJsonFiles(): VitePlugin {
 
       minifyJsonFiles(assetsDir, outputDir);
       minifyJsonFiles(localesDir, join(outputDir, "locales"));
+      // Town map, tileset and player atlas. postbuild.mjs also copies this, but git deploys never run it.
+      const overlayDir = resolve("./catchcrypt/public");
+      if (existsSync(overlayDir)) {
+        logger.info(green(`Processing CatchCrypt overlay "${overlayDir}".`));
+        minifyJsonFiles(overlayDir, outputDir);
+      }
+      // Git deploys run `vite build` and never reach catchcrypt/postbuild.mjs.
+      // Without this, dist keeps the upstream logo and "PokéRogue" locale strings.
+      const brand = applyCatchcryptBrand(outputDir);
+      logger.info(
+        green(`CatchCrypt brand: ${brand.hits} strings in ${brand.files} files, ${brand.edits} Discord edits`),
+      );
 
       logger.info(cyan("JSON minification complete."));
     },
