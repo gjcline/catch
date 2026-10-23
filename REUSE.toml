@@ -58,7 +58,9 @@ path = [
     ".nvmrc",
     "RELEASE",
     # patch files for broken packages
-    "patches/*.patch"
+    "patches/*.patch",
+    "presence/package.json",
+    "presence/pnpm-lock.yaml"
 ]
 SPDX-License-Identifier = "CC0-1.0"
 SPDX-FileCopyrightText = "NONE"

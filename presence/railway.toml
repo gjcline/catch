@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Pagefault Games
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Railway service root directory must be `presence` (this folder).
+# PORT is injected by Railway. PRESENCE_MAX defaults to 80.
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "node src/index.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
