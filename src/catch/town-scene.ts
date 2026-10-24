@@ -5,6 +5,20 @@
  */
 import { loggedInUser } from "#app/account";
 import {
+  biomeAreaBg,
+  biomeAreaName,
+  biomeBgKey,
+  biomeIdFromArea,
+  buildBiomeArea,
+  currentRunBiome,
+  encounterForArea,
+  isBiomeArea,
+  noteRunBiome,
+  overworldBiomeIds,
+  setTownEncounter,
+  townWarpRequests,
+} from "#app/catch/town-biomes";
+import {
   allTownSprites,
   type CharacterPickerState,
   characterPickerKey,
@@ -30,7 +44,9 @@ import {
   type AreaId,
   type BuiltMap,
   buildOverworld,
+  type CoreAreaId,
   type Dir,
+  type MapWarp,
   type TownSpot,
   tiledFromCache,
 } from "#app/catch/town-maps";
@@ -118,6 +134,8 @@ export class TownScene extends Phaser.Scene {
   private previewTimer: Phaser.Time.TimerEvent | undefined;
   private spriteId = DEFAULT_TOWN_SPRITE;
   private spots: TownSpot[] = [];
+  private warps: MapWarp[] = [];
+  private warpLatch = false;
   private wallet: TownWallet = { money: null, freeTaken: {} };
   /** Door or person already opened, so holding into them does not reopen the menu. */
   private doorLatch: string | null = null;
@@ -149,12 +167,16 @@ export class TownScene extends Phaser.Scene {
       this.load.atlas(playerAtlasKey(character.id), character.file, "atlas.json");
     }
     this.load.setPath("images/arenas/");
-    for (const b of ["grass", "beach", "cave"]) {
-      this.load.image(`cc_bg_${b}`, `${b}_bg.png`);
+    const banners = new Set<string>(["grass", "beach", "cave"]);
+    for (const biomeId of overworldBiomeIds()) {
+      banners.add(biomeBgKey(biomeId));
+    }
+    for (const key of banners) {
+      this.load.image(`cc_bg_${key}`, `${key}_bg.png`);
     }
   }
 
-  create(data?: { area?: AreaId; from?: Dir }) {
+  create(data?: { area?: AreaId; from?: Dir; atWarp?: AreaId }) {
     try {
       this.boot(data);
     } catch (err) {
@@ -171,7 +193,7 @@ export class TownScene extends Phaser.Scene {
     }
   }
 
-  private boot(data?: { area?: AreaId; from?: Dir }) {
+  private boot(data?: { area?: AreaId; from?: Dir; atWarp?: AreaId }) {
     this.bindPresenceLifecycle();
     this.leaving = false;
     this.switching = false;
@@ -185,14 +207,23 @@ export class TownScene extends Phaser.Scene {
     this.wallet = { money: this.currentMoney(), freeTaken: {} };
     (window as any).__ccTownMenu = null;
     this.clearRemotes();
+    noteRunBiome(currentRunBiome());
     this.area = data?.area ?? lastArea;
     lastArea = this.area;
-    const built = buildOverworld(this.area, tiledFromCache(this.cache.tilemap.get("cc_town")));
+    const built = this.builtMap();
     this.paint(built);
     this.spots = built.spots;
+    this.warps = built.warps;
+    this.warpLatch = false;
     this.drawSpots();
+    const warpBack = data?.atWarp ? built.warps.find(warp => warp.to === data.atWarp) : undefined;
     const entrance = (data?.from && built.spawns[data.from]) || built.defaultSpawn;
-    const start = data?.from ? entrance : (lastPos ?? entrance);
+    let start = lastPos ?? entrance;
+    if (warpBack) {
+      start = { x: warpBack.x * 32 + 16, y: (warpBack.y + 1) * 32 + 16 };
+    } else if (data?.from) {
+      start = entrance;
+    }
     this.ensureCharacterAnims();
     this.player = this.add.sprite(start.x, start.y, playerAtlasKey(this.spriteId), idleFrame(this.dir)).setDepth(5);
     (window as any).__ccSprite = this.spriteId;
@@ -420,34 +451,57 @@ export class TownScene extends Phaser.Scene {
     this.townTouch?.setOverlay({ menu: this.menu, picker: this.picker });
   }
 
+  /** The map for this room. Biome rooms are generated; the town may include biome pads. */
+  private builtMap(): BuiltMap {
+    const town = tiledFromCache(this.cache.tilemap.get("cc_town"));
+    if (isBiomeArea(this.area)) {
+      const biomeId = biomeIdFromArea(this.area);
+      if (biomeId == null) {
+        throw new Error(`CatchCrypt has no map for ${this.area}`);
+      }
+      return buildBiomeArea(biomeId);
+    }
+    const warps = this.area === "town" ? townWarpRequests() : [];
+    return buildOverworld(this.area, town, warps);
+  }
+
+  /** Name and exits for the room the player is standing in. */
+  private areaInfo(): { name: string; bg?: string; exits: (typeof AREAS)[CoreAreaId]["exits"] } {
+    if (isBiomeArea(this.area)) {
+      return {
+        name: biomeAreaName(this.area) ?? "Route",
+        bg: biomeAreaBg(this.area) ?? undefined,
+        exits: { south: { to: "town", level: 0 } },
+      };
+    }
+    return AREAS[this.area];
+  }
+
   /** Area name card, using PokeRogue's own biome art for the generated areas. */
   private showBanner() {
-    const def = AREAS[this.area];
+    const def = this.areaInfo();
     const cam = this.cameras.main;
     const { width, height } = this.scale;
     const cx = width / 2;
     const top = height / 2 - (height / 2 - 16) / cam.zoom;
     const parts: Phaser.GameObjects.GameObject[] = [];
-    if (def.bg) {
+    const bannerKey = def.bg ? `cc_bg_${def.bg}` : "";
+    const showBg = bannerKey.length > 0 && this.textures.exists(bannerKey);
+    if (showBg) {
       parts.push(
-        this.add
-          .image(cx, top, `cc_bg_${def.bg}`)
-          .setOrigin(0.5, 0)
-          .setScrollFactor(0)
-          .setDepth(110)
-          .setDisplaySize(160, 60),
+        this.add.image(cx, top, bannerKey).setOrigin(0.5, 0).setScrollFactor(0).setDepth(110).setDisplaySize(160, 60),
       );
     }
     parts.push(
       this.add
-        .text(cx, top + (def.bg ? 30 : 0), def.name, {
+        .text(cx, top + (showBg ? 30 : 0), def.name, {
           fontFamily: "emerald, monospace",
           fontSize: "48px",
           color: "#ffffff",
           backgroundColor: "#1b2440cc",
           padding: { x: 18, y: 6 },
         })
-        .setOrigin(0.5, def.bg ? 0.5 : 0)
+        .setOrigin(0.5, showBg ? 0.5 : 0)
         .setScrollFactor(0)
         .setDepth(111)
         .setScale(1 / cam.zoom),
@@ -493,9 +547,14 @@ export class TownScene extends Phaser.Scene {
     }
     if (built.tint !== undefined) {
       ground.setTint(built.tint);
-      grass.setTint(built.tint);
       world.setTint(built.tint);
       above.setTint(built.tint);
+      if (built.grassTint === undefined) {
+        grass.setTint(built.tint);
+      }
+    }
+    if (built.grassTint !== undefined) {
+      grass.setTint(built.grassTint);
     }
     this.mapW = built.w * 32;
     this.mapH = built.h * 32;
@@ -585,6 +644,7 @@ export class TownScene extends Phaser.Scene {
         this.tryAutoDoor();
         if (!this.menu) {
           this.grassStep(p.x, p.y + 14);
+          this.tryWarp(p.x, p.y + 14);
         }
       } else if (!edge) {
         this.tryBumpNpc();
@@ -615,12 +675,28 @@ export class TownScene extends Phaser.Scene {
     const chance = typeof w.__ccGrassChance === "number" ? w.__ccGrassChance : 0.1;
     if (Math.random() < chance) {
       w.__ccGrassBattle = (w.__ccGrassBattle ?? 0) + 1;
-      this.leave("button");
+      this.leave("button", true);
     }
   }
 
+  /** Step onto a biome pad. The south tile of the pad is the approach, so the gate does not chain. */
+  private tryWarp(x: number, y: number) {
+    const tx = Math.floor(x / 32);
+    const ty = Math.floor(y / 32);
+    const warp = this.warps.find(pad => pad.x === tx && pad.y === ty);
+    if (!warp) {
+      this.warpLatch = false;
+      return;
+    }
+    if (this.warpLatch) {
+      return;
+    }
+    this.warpLatch = true;
+    this.goTo(warp.to);
+  }
+
   private tryExit(edge: Dir) {
-    const exit = AREAS[this.area].exits[edge];
+    const exit = this.areaInfo().exits[edge];
     if (!exit) {
       this.showLocked("You haven't unlocked this area yet.");
       return;
@@ -630,12 +706,17 @@ export class TownScene extends Phaser.Scene {
       (window as any).__ccLevelBlocked = ((window as any).__ccLevelBlocked ?? 0) + 1;
       return;
     }
+    const atWarp = exit.to === "town" && isBiomeArea(this.area) ? this.area : undefined;
+    this.goTo(exit.to, OPP[edge], atWarp);
+  }
+
+  private goTo(area: AreaId, from?: Dir, atWarp?: AreaId) {
     this.switching = true;
     this.retainPresence = true;
     this.clearRemotes();
     lastPos = null;
     this.cameras.main.fadeOut(200, 0, 0, 0);
-    this.time.delayedCall(220, () => this.scene.restart({ area: exit.to, from: OPP[edge] }));
+    this.time.delayedCall(220, () => this.scene.restart({ area, from, atWarp }));
   }
 
   /** Throttled: at most once every 2.5 s. */
@@ -710,10 +791,11 @@ export class TownScene extends Phaser.Scene {
   }
 
   /** Leave town and hand control back to PokeRogue's encounter. Only Battle, B or Esc do this. */
-  leave(_why: "button") {
+  leave(_why: "button", fromEncounter = false) {
     if (this.leaving || this.switching || this.partyOpen || this.picker) {
       return;
     }
+    setTownEncounter(fromEncounter ? encounterForArea(this.area) : null);
     this.leaving = true;
     this.releasePresence();
     lastPos = { x: this.player.x, y: this.player.y };
