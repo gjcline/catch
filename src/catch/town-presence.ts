@@ -166,6 +166,18 @@ export function decodePresenceMessage(payload: unknown): PresenceEvent | null {
   return null;
 }
 
+/** A hidden or refused visit does not open a socket. A visible visit always reconnects. */
+export function presenceResumePlan(input: {
+  visible: boolean;
+  closed: boolean;
+  refused: boolean;
+}): "ignore" | "reconnect" {
+  if (!input.visible || input.closed || input.refused) {
+    return "ignore";
+  }
+  return "reconnect";
+}
+
 /**
  * One socket for the visit. Failures are swallowed so the town still walks offline.
  */
@@ -174,6 +186,8 @@ export class TownPresence {
   private opening = false;
   private ready = false;
   private closed = false;
+  /** Bumps when a socket is dropped so an in-flight connect cannot attach late. */
+  private generation = 0;
   private selfId = "";
   private helloState: HelloState | null = null;
   private pendingMove: MoveState | null = null;
@@ -214,6 +228,26 @@ export class TownPresence {
     this.scheduleMove();
   }
 
+  /**
+   * Open a new socket after the tab was frozen or the network returned.
+   * Phones often keep a dead socket marked connected until the next packet fails.
+   */
+  reconnect(state: HelloState): void {
+    this.helloState = state;
+    this.pendingMove = null;
+    this.clearMoveTimer();
+    const plan = presenceResumePlan({
+      visible: true,
+      closed: this.closed,
+      refused: Date.now() < refusedUntil,
+    });
+    if (plan === "ignore") {
+      return;
+    }
+    this.dropSocket();
+    this.open();
+  }
+
   disconnect(): void {
     if (this.closed && !this.socket) {
       return;
@@ -237,16 +271,27 @@ export class TownPresence {
     this.opening = true;
     this.openSocket(url).catch(err => {
       console.error("CatchCrypt: presence unavailable", err);
-      this.opening = false;
-      this.socket = null;
     });
   }
 
+  private dropSocket(): void {
+    this.generation += 1;
+    this.ready = false;
+    this.opening = false;
+    const socket = this.socket;
+    this.socket = null;
+    if (!socket) {
+      return;
+    }
+    socket.removeAllListeners();
+    socket.disconnect();
+  }
+
   private async openSocket(url: string): Promise<void> {
+    const generation = this.generation;
     try {
       const { io } = await import("socket.io-client");
-      if (this.closed) {
-        this.opening = false;
+      if (this.closed || generation !== this.generation) {
         return;
       }
       const socket = io(url, {
@@ -254,8 +299,16 @@ export class TownPresence {
         timeout: 2500,
         transports: ["websocket", "polling"],
       });
+      if (this.closed || generation !== this.generation) {
+        socket.removeAllListeners();
+        socket.disconnect();
+        return;
+      }
       this.socket = socket;
       socket.on("connect_error", () => {
+        if (generation !== this.generation) {
+          return;
+        }
         this.failSoft(socket);
       });
       socket.on("disconnect", () => {
@@ -267,12 +320,17 @@ export class TownPresence {
         this.socket = null;
       });
       socket.on("message", (payload: unknown) => {
+        if (generation !== this.generation) {
+          return;
+        }
         this.onMessage(payload);
       });
     } catch (err) {
       console.error("CatchCrypt: presence unavailable", err);
-      this.opening = false;
-      this.socket = null;
+      if (generation === this.generation) {
+        this.opening = false;
+        this.socket = null;
+      }
     }
   }
 

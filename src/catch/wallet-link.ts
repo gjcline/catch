@@ -70,22 +70,29 @@ export async function connectWallet(): Promise<string> {
   const sig = signed instanceof Uint8Array ? signed : signed.signature;
   const l = await api("/account/wallet/link", { signature: bs58(sig) });
   if (!l.ok) {
-    throw new Error(l.error === "wallet_linked_to_other_account" ? "That wallet is linked to another account." : "Wallet link failed.");
+    throw new Error(
+      l.error === "wallet_linked_to_other_account"
+        ? "That wallet is linked to another account."
+        : "Wallet link failed.",
+    );
   }
   return wallet;
 }
 
+export const walletOverlayCss =
+  "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7);font-family:emerald,monospace;box-sizing:border-box;padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));touch-action:manipulation";
+
 function el(html: string): HTMLDivElement {
   const d = document.createElement("div");
   d.innerHTML = html;
-  d.style.cssText =
-    "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7);font-family:emerald,monospace;";
+  d.style.cssText = walletOverlayCss;
   document.body.appendChild(d);
   return d;
 }
 const box =
-  "background:#1b2440;border:4px solid #e3342f;border-radius:8px;padding:24px;max-width:440px;color:#fff;text-align:center;font-size:22px;line-height:1.3";
-const btn = "margin:8px;padding:10px 18px;font-size:20px;border:0;border-radius:6px;cursor:pointer;font-family:inherit";
+  "background:#1b2440;border:4px solid #e3342f;border-radius:8px;padding:16px;width:min(440px,100%);max-height:min(80dvh,calc(100dvh - 24px));overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;box-sizing:border-box;color:#fff;text-align:center;font-size:20px;line-height:1.35";
+const btn =
+  "margin:8px;padding:12px 18px;min-height:48px;font-size:20px;border:0;border-radius:6px;cursor:pointer;font-family:inherit;touch-action:manipulation";
 
 /** Show the connect step. Resolves when the player connects or confirms skipping. */
 export function showWalletPrompt(force = false): Promise<void> {
