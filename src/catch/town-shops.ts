@@ -248,14 +248,15 @@ export function townKeyAction(key: string, menuOpen: boolean): TownKeyAction {
   return "ignore";
 }
 
-/** Menus block walking and presence the same way the party screen does. */
+/** Menus and the character picker block walking and presence the same way the party screen does. */
 export function townShouldMove(flags: {
   leaving: boolean;
   switching: boolean;
   partyOpen: boolean;
   menuOpen: boolean;
+  pickerOpen?: boolean;
 }): boolean {
-  return !flags.leaving && !flags.switching && !flags.partyOpen && !flags.menuOpen;
+  return !flags.leaving && !flags.switching && !flags.partyOpen && !flags.menuOpen && !flags.pickerOpen;
 }
 
 export function pointInSpot(spot: TownSpot, x: number, y: number): boolean {

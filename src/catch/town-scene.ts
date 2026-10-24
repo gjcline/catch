@@ -5,6 +5,23 @@
  */
 import { loggedInUser } from "#app/account";
 import {
+  type CharacterPickerState,
+  characterPickerKey,
+  DEFAULT_TOWN_SPRITE,
+  idleFrame,
+  loadTownSprite,
+  moveCharacterPicker,
+  openCharacterPicker,
+  playerAtlasKey,
+  resolveTownSprite,
+  saveTownSprite,
+  selectedTownCharacter,
+  townCharacters,
+  townFacings,
+  walkAnimKey,
+  walkFramePrefix,
+} from "#app/catch/town-characters";
+import {
   AREAS,
   type AreaId,
   type BuiltMap,
@@ -83,6 +100,10 @@ export class TownScene extends Phaser.Scene {
   private partyOpen = false;
   private menu: TownMenu | null = null;
   private menuRoot: Phaser.GameObjects.Container | undefined;
+  private picker: CharacterPickerState | null = null;
+  private pickerRoot: Phaser.GameObjects.Container | undefined;
+  private previewTimer: Phaser.Time.TimerEvent | undefined;
+  private spriteId = DEFAULT_TOWN_SPRITE;
   private spots: TownSpot[] = [];
   private wallet: TownWallet = { money: null, freeTaken: {} };
   /** Door or person already opened, so holding into them does not reopen the menu. */
@@ -108,6 +129,12 @@ export class TownScene extends Phaser.Scene {
     this.load.tilemapTiledJSON("cc_town", "town.json");
     this.load.image("cc_tiles", "tuxmon-sample-32px-extruded.png");
     this.load.atlas("cc_player", "atlas.png", "atlas.json");
+    for (const character of townCharacters) {
+      if (character.file === "atlas.png") {
+        continue;
+      }
+      this.load.atlas(playerAtlasKey(character.id), character.file, "atlas.json");
+    }
     this.load.setPath("images/arenas/");
     for (const b of ["grass", "beach", "cave"]) {
       this.load.image(`cc_bg_${b}`, `${b}_bg.png`);
@@ -137,6 +164,10 @@ export class TownScene extends Phaser.Scene {
     this.switching = false;
     this.menu = null;
     this.menuRoot = undefined;
+    this.picker = null;
+    this.pickerRoot = undefined;
+    this.clearPreviewTimer();
+    this.spriteId = loadTownSprite(this.accountName());
     this.doorLatch = null;
     this.wallet = { money: this.currentMoney(), freeTaken: {} };
     (window as any).__ccTownMenu = null;
@@ -149,22 +180,9 @@ export class TownScene extends Phaser.Scene {
     this.drawSpots();
     const entrance = (data?.from && built.spawns[data.from]) || built.defaultSpawn;
     const start = data?.from ? entrance : (lastPos ?? entrance);
-    this.player = this.add.sprite(start.x, start.y, "cc_player", `misa-${this.dir}`).setDepth(5);
-    for (const d of ["left", "right", "front", "back"]) {
-      if (!this.anims.exists(`cc-${d}`)) {
-        this.anims.create({
-          key: `cc-${d}`,
-          frames: this.anims.generateFrameNames("cc_player", {
-            prefix: `misa-${d}-walk.`,
-            start: 0,
-            end: 3,
-            zeroPad: 3,
-          }),
-          frameRate: 10,
-          repeat: -1,
-        });
-      }
-    }
+    this.ensureCharacterAnims();
+    this.player = this.add.sprite(start.x, start.y, playerAtlasKey(this.spriteId), idleFrame(this.dir)).setDepth(5);
+    (window as any).__ccSprite = this.spriteId;
     const cam = this.cameras.main;
     this.lastTileKey = "";
     this.grassReadyAt = this.time.now + 1500;
@@ -206,7 +224,23 @@ export class TownScene extends Phaser.Scene {
       .setName("party-button");
     pbtn.setScale(1 / cam.zoom).setPosition(btn.x - btn.displayWidth - 6 / cam.zoom, btn.y);
     pbtn.on("pointerdown", () => this.openParty());
+    const cbtn = this.add
+      .text(0, 0, "Character", {
+        fontFamily: "emerald, monospace",
+        fontSize: "48px",
+        color: "#ffffff",
+        backgroundColor: "#2f6b4a",
+        padding: { x: 24, y: 12 },
+      })
+      .setOrigin(1, 1)
+      .setScrollFactor(0)
+      .setDepth(100)
+      .setInteractive({ useHandCursor: true })
+      .setName("character-button");
+    cbtn.setScale(1 / cam.zoom).setPosition(pbtn.x - pbtn.displayWidth - 6 / cam.zoom, btn.y);
+    cbtn.on("pointerdown", () => this.openPicker());
     kb.on("keydown-P", () => this.openParty());
+    kb.on("keydown-C", () => this.openPicker());
     kb.on("keydown-B", () => this.onTownKey("b"));
     kb.on("keydown-ESC", () => this.onTownKey("esc"));
     kb.on("keydown-SPACE", () => this.onTownKey("space"));
@@ -216,11 +250,15 @@ export class TownScene extends Phaser.Scene {
     kb.on("keydown-DOWN", () => this.nudgeMenu(1));
     kb.on("keydown-W", () => this.nudgeMenu(-1));
     kb.on("keydown-S", () => this.nudgeMenu(1));
+    kb.on("keydown-LEFT", () => this.onPickerStep(-1));
+    kb.on("keydown-RIGHT", () => this.onPickerStep(1));
+    kb.on("keydown-A", () => this.onPickerStep(-1));
+    kb.on("keydown-D", () => this.onPickerStep(1));
     this.add
       .text(
         width / 2 - (width / 2 - 20) / cam.zoom,
         height / 2 + (height / 2 - 20) / cam.zoom,
-        "Arrows or WASD to walk.  Space or Z at a door.  P for your Pokémon.  Battle, B or Esc for the next wave.",
+        "Arrows or WASD to walk.  Space or Z at a door.  P for your Pokémon.  C for your character.  Battle, B or Esc for the next wave.",
         {
           fontFamily: "emerald, monospace",
           fontSize: "36px",
@@ -401,12 +439,12 @@ export class TownScene extends Phaser.Scene {
       } else if (!edge) {
         this.tryBumpNpc();
       }
-      if (!this.menu) {
-        p.anims.play(`cc-${this.dir}`, true);
+      if (!this.menu && !this.picker) {
+        p.anims.play(walkAnimKey(this.spriteId, this.dir), true);
       }
-    } else if (!this.menu) {
+    } else if (!this.menu && !this.picker) {
       p.anims.stop();
-      p.setFrame(`misa-${this.dir}`);
+      p.setFrame(idleFrame(this.dir));
     }
   }
 
@@ -479,7 +517,7 @@ export class TownScene extends Phaser.Scene {
 
   /** Show PokeRogue's own party screen (check mode: summary, moves, reorder) over a paused town. */
   openParty() {
-    if (this.leaving || this.switching || this.partyOpen || this.menu || !battleRef) {
+    if (this.leaving || this.switching || this.partyOpen || this.menu || this.picker || !battleRef) {
       return;
     }
     this.partyOpen = true;
@@ -513,7 +551,7 @@ export class TownScene extends Phaser.Scene {
 
   /** Leave town and hand control back to PokeRogue's encounter. Only Battle, B or Esc do this. */
   leave(_why: "button") {
-    if (this.leaving || this.switching || this.partyOpen) {
+    if (this.leaving || this.switching || this.partyOpen || this.picker) {
       return;
     }
     this.leaving = true;
@@ -556,12 +594,17 @@ export class TownScene extends Phaser.Scene {
         x: this.player.x,
         y: this.player.y,
         facing: this.dir,
-        sprite: "misa",
+        sprite: this.spriteId,
         area: this.area,
       });
     } catch (err) {
       console.error("CatchCrypt: presence skipped", err);
     }
+  }
+
+  private accountName(): string | null {
+    const username = loggedInUser?.username?.trim();
+    return username && username.length > 0 ? username : null;
   }
 
   private presenceName(): string {
@@ -575,6 +618,30 @@ export class TownScene extends Phaser.Scene {
     }
     const username = loggedInUser?.username?.trim();
     return username && username.length > 0 ? username : "Guest";
+  }
+
+  /** Four-direction walk cycles for every character sheet. Textures are loaded in preload. */
+  private ensureCharacterAnims() {
+    for (const character of townCharacters) {
+      const atlas = playerAtlasKey(character.id);
+      for (const facing of townFacings()) {
+        const key = walkAnimKey(character.id, facing);
+        if (this.anims.exists(key)) {
+          continue;
+        }
+        this.anims.create({
+          key,
+          frames: this.anims.generateFrameNames(atlas, {
+            prefix: walkFramePrefix(facing),
+            start: 0,
+            end: 3,
+            zeroPad: 3,
+          }),
+          frameRate: 10,
+          repeat: -1,
+        });
+      }
+    }
   }
 
   /** Throttled inside TownPresence. Skipped while a menu, the party screen, or an area fade pauses update(). */
@@ -594,11 +661,12 @@ export class TownScene extends Phaser.Scene {
     if (this.leaving || this.switching || peer.area !== this.area) {
       return;
     }
+    const spriteId = resolveTownSprite(peer.sprite);
     let sprite = this.remotes.get(peer.id);
     if (sprite?.active) {
       this.remoteLabels.get(peer.id)?.setText(peer.name);
     } else {
-      sprite = this.add.sprite(peer.x, peer.y, "cc_player", `misa-${peer.facing}`).setDepth(5);
+      sprite = this.add.sprite(peer.x, peer.y, playerAtlasKey(spriteId), idleFrame(peer.facing)).setDepth(5);
       this.remotes.set(peer.id, sprite);
       const label = this.add
         .text(peer.x, peer.y - 22, peer.name, {
@@ -612,6 +680,7 @@ export class TownScene extends Phaser.Scene {
         .setDepth(6);
       this.remoteLabels.set(peer.id, label);
     }
+    sprite.setData("ccSprite", spriteId);
     this.placeRemote(peer.id, peer.x, peer.y, peer.facing);
     (window as any).__ccPresencePeers = this.remotes.size;
   }
@@ -628,10 +697,15 @@ export class TownScene extends Phaser.Scene {
     if (!sprite?.active) {
       return;
     }
+    const spriteId = resolveTownSprite(sprite.getData("ccSprite"));
+    const atlas = playerAtlasKey(spriteId);
+    if (sprite.texture.key !== atlas) {
+      sprite.setTexture(atlas, idleFrame(facing));
+    }
     const moved = Math.hypot(sprite.x - x, sprite.y - y) > 0.5;
     sprite.setPosition(x, y);
     if (moved) {
-      sprite.anims.play(`cc-${facing}`, true);
+      sprite.anims.play(walkAnimKey(spriteId, facing), true);
       const prev = sprite.getData("ccStop") as Phaser.Time.TimerEvent | undefined;
       prev?.remove(false);
       sprite.setData(
@@ -641,12 +715,12 @@ export class TownScene extends Phaser.Scene {
             return;
           }
           sprite.anims.stop();
-          sprite.setFrame(`misa-${facing}`);
+          sprite.setFrame(idleFrame(facing));
         }),
       );
     } else {
       sprite.anims.stop();
-      sprite.setFrame(`misa-${facing}`);
+      sprite.setFrame(idleFrame(facing));
     }
     this.remoteLabels.get(id)?.setPosition(x, y - 22);
   }
@@ -680,6 +754,7 @@ export class TownScene extends Phaser.Scene {
       switching: this.switching,
       partyOpen: this.partyOpen,
       menuOpen: this.menu !== null,
+      pickerOpen: this.picker !== null,
     });
   }
 
@@ -694,6 +769,19 @@ export class TownScene extends Phaser.Scene {
 
   private onTownKey(key: string) {
     if (this.leaving || this.switching || this.partyOpen) {
+      return;
+    }
+    if (this.picker) {
+      const pickerAction = characterPickerKey(key);
+      if (pickerAction === "close") {
+        this.closePicker();
+      } else if (pickerAction === "confirm") {
+        this.confirmPicker();
+      } else if (pickerAction === "prev") {
+        this.onPickerStep(-1);
+      } else if (pickerAction === "next") {
+        this.onPickerStep(1);
+      }
       return;
     }
     const action = townKeyAction(key, this.menu !== null);
@@ -715,6 +803,10 @@ export class TownScene extends Phaser.Scene {
   }
 
   private nudgeMenu(dir: -1 | 1) {
+    if (this.picker) {
+      this.onPickerStep(dir);
+      return;
+    }
     if (!this.menu || this.leaving || this.switching || this.partyOpen) {
       return;
     }
@@ -757,14 +849,14 @@ export class TownScene extends Phaser.Scene {
   }
 
   private openSpot(spot: TownSpot) {
-    if (this.leaving || this.switching || this.partyOpen) {
+    if (this.leaving || this.switching || this.partyOpen || this.picker) {
       return;
     }
     this.wallet = { ...this.wallet, money: this.currentMoney() };
     this.menu = openTownMenu(spot, this.wallet.money);
     this.doorLatch = spot.id;
     this.player.anims.stop();
-    this.player.setFrame(`misa-${this.dir}`);
+    this.player.setFrame(idleFrame(this.dir));
     this.input.keyboard?.resetKeys();
     (window as any).__ccTownMenu = spot.kind;
     (window as any).__ccTownMenuName = spot.name;
@@ -777,6 +869,74 @@ export class TownScene extends Phaser.Scene {
     this.menuRoot = undefined;
     (window as any).__ccTownMenu = null;
     this.input.keyboard?.resetKeys();
+  }
+
+  private onPickerStep(dir: -1 | 1) {
+    if (!this.picker || this.leaving || this.switching || this.partyOpen) {
+      return;
+    }
+    moveCharacterPicker(this.picker, dir);
+    this.renderPicker();
+  }
+
+  /** Character sheet. Movement stays blocked until this closes. */
+  private openPicker() {
+    if (this.leaving || this.switching || this.partyOpen || this.menu || this.picker) {
+      return;
+    }
+    this.picker = openCharacterPicker(this.spriteId);
+    this.player.anims.stop();
+    this.player.setFrame(idleFrame(this.dir));
+    this.input.keyboard?.resetKeys();
+    (window as any).__ccPicker = true;
+    this.renderPicker();
+  }
+
+  private closePicker() {
+    this.clearPreviewTimer();
+    this.picker = null;
+    this.pickerRoot?.destroy(true);
+    this.pickerRoot = undefined;
+    (window as any).__ccPicker = false;
+    this.input.keyboard?.resetKeys();
+  }
+
+  private confirmPicker() {
+    if (!this.picker || this.leaving || this.switching) {
+      return;
+    }
+    const next = selectedTownCharacter(this.picker).id;
+    const changed = next !== this.spriteId;
+    this.spriteId = saveTownSprite(this.accountName(), next);
+    this.player.setTexture(playerAtlasKey(this.spriteId), idleFrame(this.dir));
+    this.player.anims.stop();
+    this.player.setFrame(idleFrame(this.dir));
+    (window as any).__ccSprite = this.spriteId;
+    this.closePicker();
+    if (changed) {
+      this.announceSprite();
+    }
+  }
+
+  /** Re-hello so other players redraw this sprite. Solo play ignores a missing socket. */
+  private announceSprite() {
+    try {
+      this.presence?.hello({
+        name: this.presenceName(),
+        x: this.player.x,
+        y: this.player.y,
+        facing: this.dir,
+        sprite: this.spriteId,
+        area: this.area,
+      });
+    } catch (err) {
+      console.error("CatchCrypt: character was saved, presence skipped", err);
+    }
+  }
+
+  private clearPreviewTimer() {
+    this.previewTimer?.remove(false);
+    this.previewTimer = undefined;
   }
 
   private confirmOpenMenu() {
@@ -988,6 +1148,128 @@ export class TownScene extends Phaser.Scene {
     this.menuRoot = root;
   }
 
+  private renderPicker() {
+    this.clearPreviewTimer();
+    this.pickerRoot?.destroy(true);
+    this.pickerRoot = undefined;
+    const picker = this.picker;
+    if (!picker) {
+      return;
+    }
+    const selected = selectedTownCharacter(picker);
+    const cam = this.cameras.main;
+    const { width, height } = this.scale;
+    const scale = 1 / cam.zoom;
+    const panelW = 560;
+    const columns = 2;
+    const rowH = 50;
+    const gridTop = 236;
+    const rows = Math.ceil(townCharacters.length / columns);
+    const chooseY = gridTop + rows * rowH + 6;
+    const panelH = chooseY + 86;
+    const screenLeft = (width - panelW * scale) / 2;
+    const screenTop = (height - panelH * scale) / 2;
+    const originX = width / 2 + (screenLeft - width / 2) / cam.zoom;
+    const originY = height / 2 + (screenTop - height / 2) / cam.zoom;
+    const root = this.add.container(originX, originY).setScrollFactor(0).setDepth(200).setScale(scale);
+    root.setName("character-picker");
+    const bg = this.add.graphics();
+    bg.fillStyle(0x1b2440, 0.94);
+    bg.fillRoundedRect(0, 0, panelW, panelH, 12);
+    bg.lineStyle(4, 0x7dcea0, 1);
+    bg.strokeRoundedRect(0, 0, panelW, panelH, 12);
+    root.add(bg);
+    root.add(
+      this.add.text(28, 16, "Character", {
+        fontFamily: "emerald, monospace",
+        fontSize: "40px",
+        color: "#b7ebc6",
+      }),
+    );
+    const preview = this.add.sprite(panelW / 2, 128, playerAtlasKey(selected.id), idleFrame("front")).setScale(4);
+    preview.anims.play(walkAnimKey(selected.id, "front"), true);
+    root.add(preview);
+    const facings = townFacings();
+    let tick = 0;
+    this.previewTimer = this.time.addEvent({
+      delay: 640,
+      loop: true,
+      callback: () => {
+        if (!preview.active) {
+          return;
+        }
+        tick = (tick + 1) % facings.length;
+        const facing = facings[tick] ?? "front";
+        preview.anims.play(walkAnimKey(selected.id, facing), true);
+      },
+    });
+    root.add(
+      this.add
+        .text(panelW / 2, 196, selected.name, {
+          fontFamily: "emerald, monospace",
+          fontSize: "32px",
+          color: "#ffe08a",
+        })
+        .setOrigin(0.5, 0),
+    );
+    const cellW = (panelW - 64) / columns;
+    for (let index = 0; index < townCharacters.length; index++) {
+      const character = townCharacters[index];
+      if (!character) {
+        continue;
+      }
+      const col = index % columns;
+      const row = Math.floor(index / columns);
+      const x = 28 + col * (cellW + 8);
+      const y = gridTop + row * rowH;
+      const highlighted = index === picker.index;
+      const hit = this.add
+        .rectangle(x + cellW / 2, y + 18, cellW, 42, highlighted ? 0x31406e : 0x000000, highlighted ? 1 : 0.15)
+        .setInteractive({ useHandCursor: true });
+      hit.on("pointerdown", () => {
+        if (!this.picker || this.partyOpen || this.leaving) {
+          return;
+        }
+        if (this.picker.index === index) {
+          this.confirmPicker();
+          return;
+        }
+        this.picker.index = index;
+        this.renderPicker();
+      });
+      root.add(hit);
+      root.add(
+        this.add.text(x + 12, y + 2, `${highlighted ? "> " : "  "}${character.name}`, {
+          fontFamily: "emerald, monospace",
+          fontSize: "30px",
+          color: highlighted ? "#ffe08a" : "#ffffff",
+        }),
+      );
+    }
+    const choose = this.add
+      .rectangle(panelW / 2, chooseY + 22, panelW - 56, 44, 0x2f6b4a, 1)
+      .setInteractive({ useHandCursor: true });
+    choose.on("pointerdown", () => this.confirmPicker());
+    root.add(choose);
+    root.add(
+      this.add
+        .text(panelW / 2, chooseY + 6, "Choose", {
+          fontFamily: "emerald, monospace",
+          fontSize: "32px",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5, 0),
+    );
+    root.add(
+      this.add.text(28, panelH - 34, "Arrows or click.  Space confirms.  B or Esc closes.", {
+        fontFamily: "emerald, monospace",
+        fontSize: "22px",
+        color: "#c5cbe0",
+      }),
+    );
+    this.pickerRoot = root;
+  }
+
   private drawSpots() {
     const matColor: Partial<Record<TownSpot["kind"], number>> = {
       center: 0xe85d75,
@@ -1002,7 +1284,7 @@ export class TownScene extends Phaser.Scene {
         .setDepth(6);
       zone.setName(`town-spot-${spot.id}`);
       zone.on("pointerdown", () => {
-        if (this.menu || this.partyOpen || this.leaving || this.switching) {
+        if (this.menu || this.picker || this.partyOpen || this.leaving || this.switching) {
           return;
         }
         this.openSpot(spot);

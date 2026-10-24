@@ -34,6 +34,21 @@ export const TILE = 32;
 const FACING = new Set(["front", "back", "left", "right"]);
 const NAME_CHARS = /[^\p{L}\p{N} _.'-]/gu;
 
+/**
+ * Keep this list identical to `townCharacters` in src/catch/town-characters.ts.
+ * Unknown values fall back to the default so an old or mistaken client still joins.
+ */
+export const DEFAULT_SPRITE = "misa";
+export const SPRITE_IDS = ["misa", "misa-rose", "misa-sea", "misa-moss", "misa-gold", "misa-dusk"];
+const SPRITE_ALLOWLIST = new Set(SPRITE_IDS);
+
+export function sanitizeSprite(input) {
+  if (typeof input === "string" && SPRITE_ALLOWLIST.has(input)) {
+    return input;
+  }
+  return DEFAULT_SPRITE;
+}
+
 export const LIMITS = {
   /** Slightly above the client's 150px/s walk so a frame hitch still lands. */
   regenPxPerSec: 180,
@@ -91,7 +106,7 @@ export function parseHello(raw) {
     x: raw[2],
     y: raw[3],
     facing,
-    sprite: "misa",
+    sprite: sanitizeSprite(raw[5]),
     area,
   };
 }
