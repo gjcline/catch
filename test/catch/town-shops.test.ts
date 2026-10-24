@@ -133,6 +133,9 @@ describe("CatchCrypt town shops", () => {
     expect(townShouldMove({ leaving: false, switching: false, partyOpen: false, menuOpen: false })).toBe(true);
     expect(townShouldMove({ leaving: false, switching: false, partyOpen: true, menuOpen: false })).toBe(false);
     expect(townShouldMove({ leaving: false, switching: false, partyOpen: false, menuOpen: true })).toBe(false);
+    expect(
+      townShouldMove({ leaving: false, switching: false, partyOpen: false, menuOpen: false, pickerOpen: true }),
+    ).toBe(false);
   });
 
   it("puts walkable doors and solid people on the town map", () => {
@@ -232,6 +235,7 @@ describe("CatchCrypt town shops", () => {
     const files = [
       "src/catch/town-shops.ts",
       "src/catch/town-scene.ts",
+      "src/catch/town-characters.ts",
       "src/catch/town-maps.ts",
       "catchcrypt/public/town/town.json",
     ];

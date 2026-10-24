@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { io } from "socket.io-client";
-import { attemptStep, inBounds, Op, sanitizeName } from "../src/protocol.js";
+import { attemptStep, DEFAULT_SPRITE, inBounds, Op, parseHello, sanitizeName, sanitizeSprite, SPRITE_IDS } from "../src/protocol.js";
 import { createPresenceServer } from "../src/server.js";
 
 async function waitFor(msgs, pred, timeout = 3000) {
@@ -37,8 +37,8 @@ function connect(url) {
   return { socket, msgs };
 }
 
-function hello(socket, name, x, y, facing, area) {
-  socket.emit("message", [Op.HELLO, name, x, y, facing, "misa", area]);
+function hello(socket, name, x, y, facing, area, sprite = "misa") {
+  socket.emit("message", [Op.HELLO, name, x, y, facing, sprite, area]);
 }
 
 function move(socket, x, y, facing, area) {
@@ -55,6 +55,20 @@ describe("presence protocol helpers", () => {
     assert.equal(inBounds("town", 76 * 32 + 1, 10), false);
     assert.equal(inBounds("grove", 10, 10), true);
     assert.equal(inBounds("nope", 10, 10), false);
+  });
+
+  it("keeps an allowlisted sprite and falls back without failing the hello", () => {
+    assert.deepEqual(SPRITE_IDS, ["misa", "misa-rose", "misa-sea", "misa-moss", "misa-gold", "misa-dusk"]);
+    assert.equal(sanitizeSprite("misa-gold"), "misa-gold");
+    assert.equal(sanitizeSprite("not-a-sprite"), DEFAULT_SPRITE);
+    assert.equal(sanitizeSprite(12), DEFAULT_SPRITE);
+    assert.equal(sanitizeSprite(""), DEFAULT_SPRITE);
+    const chosen = parseHello([Op.HELLO, "Ada", 32, 32, "left", "misa-sea", "grove"]);
+    assert.equal(chosen.sprite, "misa-sea");
+    const fallback = parseHello([Op.HELLO, "Ada", 32, 32, "left", "nope", "grove"]);
+    assert.equal(fallback.sprite, "misa");
+    assert.equal(fallback.area, "grove");
+    assert.equal(parseHello([Op.HELLO, "Ada", 32, 32, "spin", "misa-sea", "grove"]), null);
   });
 
   it("rejects a step that is faster than the walk budget", () => {
@@ -226,6 +240,68 @@ describe("two clients on the town", () => {
       assert.equal(welcome[7], "beach");
     } finally {
       client.socket.disconnect();
+      await delay(30);
+    }
+  });
+});
+
+describe("character sprites", () => {
+  /** @type {ReturnType<typeof createPresenceServer>} */
+  let server;
+  let url;
+
+  before(async () => {
+    server = createPresenceServer({ maxPlayers: 4 });
+    const port = await server.listen(0, "127.0.0.1");
+    url = `http://127.0.0.1:${port}`;
+  });
+
+  after(async () => {
+    await server.close();
+  });
+
+  it("tells the other player about a new sprite and substitutes the default", async () => {
+    const ada = connect(url);
+    const bea = connect(url);
+    try {
+      await waitFor(ada.msgs, msg => msg === "go");
+      await waitFor(bea.msgs, msg => msg === "go");
+      hello(ada.socket, "Ada", 200, 200, "front", "town");
+      await waitFor(ada.msgs, msg => Array.isArray(msg) && msg[0] === Op.WELCOME);
+      hello(bea.socket, "Bea", 280, 200, "left", "town", "misa-sea");
+      const beaWelcome = await waitFor(bea.msgs, msg => Array.isArray(msg) && msg[0] === Op.WELCOME);
+      assert.equal(beaWelcome[6], "misa-sea");
+      const seen = await waitFor(
+        ada.msgs,
+        msg => Array.isArray(msg) && msg[0] === Op.SPAWN && msg[1] === beaWelcome[1],
+      );
+      assert.equal(seen[6], "misa-sea");
+      assert.equal(seen[7], "town");
+
+      hello(bea.socket, "Bea", 280, 200, "right", "town", "not-a-sprite");
+      const fallback = await waitFor(bea.msgs, msg => Array.isArray(msg) && msg[0] === Op.WELCOME);
+      assert.equal(fallback[6], "misa");
+      assert.equal(
+        bea.msgs.some(msg => Array.isArray(msg) && msg[0] === Op.REFUSE),
+        false,
+      );
+      const redrawn = await waitFor(
+        ada.msgs,
+        msg => Array.isArray(msg) && msg[0] === Op.SPAWN && msg[1] === beaWelcome[1] && msg[6] === "misa",
+      );
+      assert.equal(redrawn[5], "right");
+
+      hello(bea.socket, "Bea", 300, 220, "back", "town", "misa-dusk");
+      const changed = await waitFor(bea.msgs, msg => Array.isArray(msg) && msg[0] === Op.WELCOME && msg[6] === "misa-dusk");
+      assert.equal(changed[1], beaWelcome[1]);
+      const dusk = await waitFor(
+        ada.msgs,
+        msg => Array.isArray(msg) && msg[0] === Op.SPAWN && msg[1] === beaWelcome[1] && msg[6] === "misa-dusk",
+      );
+      assert.deepEqual(dusk.slice(3, 8), [300, 220, "back", "misa-dusk", "town"]);
+    } finally {
+      ada.socket.disconnect();
+      bea.socket.disconnect();
       await delay(30);
     }
   });
