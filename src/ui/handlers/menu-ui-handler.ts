@@ -458,6 +458,14 @@ export class MenuUiHandler extends OptionSelectUiHandler {
         keepOpen: true,
       },
       {
+        label: "Leaderboard",
+        handler: () => {
+          void import("#app/catch/leaderboard-ui").then(m => m.showLeaderboard());
+          return true;
+        },
+        keepOpen: true,
+      },
+      {
         label: "Wiki",
         handler: () => {
           window.open(wikiUrl, "_blank")?.focus();

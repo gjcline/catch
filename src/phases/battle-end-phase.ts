@@ -1,5 +1,5 @@
-import { catchReport, catchWalletTip } from "#app/catch/catch-client";
 import { applyAbAttrs } from "#abilities/apply-ab-attrs";
+import { catchReport, catchReportProgress, catchWalletTip } from "#app/catch/catch-client";
 import { globalScene } from "#app/global-scene";
 import { LapsingPersistentModifier, LapsingPokemonHeldItemModifier } from "#modifiers/modifier";
 import { BattlePhase } from "#phases/battle-phase";
@@ -27,8 +27,12 @@ export class BattleEndPhase extends BattlePhase {
 
     globalScene.gameData.gameStats.battles++;
     if (this.isVictory) {
-      catchReport("battle_won", { boss: globalScene.getEnemyParty().some(p => p.isBoss()), trainer: !!globalScene.currentBattle.trainer });
+      catchReport("battle_won", {
+        boss: globalScene.getEnemyParty().some(p => p.isBoss()),
+        trainer: !!globalScene.currentBattle.trainer,
+      });
       catchReport("wave_reached");
+      catchReportProgress();
       catchWalletTip();
     }
     if (
