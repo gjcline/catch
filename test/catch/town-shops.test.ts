@@ -237,6 +237,7 @@ describe("CatchCrypt town shops", () => {
       "src/catch/town-scene.ts",
       "src/catch/town-characters.ts",
       "src/catch/town-maps.ts",
+      "src/catch/town-biomes.ts",
       "catchcrypt/public/town/town.json",
     ];
     const text = files.map(file => readFileSync(file, "utf8")).join("\n");

@@ -1,13 +1,18 @@
 /**
- * CatchCrypt overworld maps (town, grove, route, forest, beach, cave). AGPL-3.0.
+ * CatchCrypt overworld maps (town, grove, route, forest, beach, cave, biome areas). AGPL-3.0.
  * Tile indexes are 0-based ids in the vendored tuxmon tileset. The town stamps
  * `town.json` from that same map pack, then opens districts around it.
  * Level gates follow the existing rules: Route 1 and Deep Forest are level 8,
  * Beach and Cave are level 10, and the Grove beside town is open.
+ * Biome areas (`biome-plains` and the rest) are built from the same tiles and
+ * connect back to town. The town grows a gate for the biomes the run has reached.
  */
 
 export type Dir = "north" | "south" | "east" | "west";
-export type AreaId = "town" | "grove" | "route1" | "forest" | "beach" | "cave";
+export type CoreAreaId = "town" | "grove" | "route1" | "forest" | "beach" | "cave";
+/** `biome-plains`, `biome-tall-grass`, and the other between-wave biome rooms. */
+export type BiomeAreaId = `biome-${string}`;
+export type AreaId = CoreAreaId | BiomeAreaId;
 
 export interface ExitDef {
   to: AreaId;
@@ -81,6 +86,19 @@ export interface TownSpot {
   lines: string[];
 }
 
+/** A walk-on pad. Stepping on it changes area. Pixel-free tile coordinates. */
+export interface MapWarp {
+  x: number;
+  y: number;
+  to: AreaId;
+  label: string;
+}
+
+export interface WarpRequest {
+  to: AreaId;
+  label: string;
+}
+
 export interface BuiltMap {
   w: number;
   h: number;
@@ -95,11 +113,15 @@ export interface BuiltMap {
   gates: MapGate[];
   /** Doors and people. Empty outside town. */
   spots: TownSpot[];
+  /** Biome pads. Empty until the run has reached a biome. */
+  warps: MapWarp[];
   tint?: number;
+  /** Encounter-tile multiply color. Falls back to `tint`. */
+  grassTint?: number;
 }
 
 /** Level gates. Returning to a previous area is always open (level 0). */
-export const AREAS: Record<AreaId, AreaDef> = {
+export const AREAS: Record<CoreAreaId, AreaDef> = {
   town: {
     name: "Town",
     exits: {
@@ -144,14 +166,14 @@ const TREE = [
   [T.treeBL, T.treeBR],
 ];
 
-interface Rect {
+export interface TileRect {
   x: number;
   y: number;
   w: number;
   h: number;
 }
 
-interface Mouth {
+export interface Mouth {
   dir: Dir;
   at: number;
   len: number;
@@ -173,10 +195,10 @@ export function tiledFromCache(entry: unknown): TiledMap | null {
   return null;
 }
 
-export function buildOverworld(id: AreaId, town: TiledMap | null): BuiltMap {
+export function buildOverworld(id: CoreAreaId, town: TiledMap | null, warps: readonly WarpRequest[] = []): BuiltMap {
   switch (id) {
     case "town":
-      return buildTown(town);
+      return buildTown(town, warps);
     case "grove":
       return buildGrove();
     case "route1":
@@ -201,7 +223,7 @@ export function overworldIssues(area: AreaId, built: BuiltMap): string[] {
     issues.push("default spawn is blocked");
     return issues;
   }
-  const exits = Object.keys(AREAS[area].exits) as Dir[];
+  const exits = Object.keys(exitsFor(area)) as Dir[];
   for (const dir of exits) {
     const spawn = built.spawns[dir];
     if (!spawn) {
@@ -237,7 +259,7 @@ export function overworldIssues(area: AreaId, built: BuiltMap): string[] {
   if (solidGrass > 0) {
     issues.push(`${solidGrass} tall grass tiles are solid`);
   }
-  const minGrass = MIN_REACHABLE_GRASS[area] ?? 0;
+  const minGrass = minReachableGrass(area);
   if (minGrass > 0) {
     let reach = 0;
     for (const key of seen) {
@@ -258,14 +280,42 @@ export function overworldIssues(area: AreaId, built: BuiltMap): string[] {
       issues.push(`sign is not solid: ${label.label}`);
     }
   }
+  for (const warp of built.warps) {
+    if (built.solid[warp.y]?.[warp.x]) {
+      issues.push(`warp is solid: ${warp.label}`);
+    }
+    if (!seen.has(tileKey(warp.x, warp.y))) {
+      issues.push(`warp is unreachable: ${warp.label}`);
+    }
+    const approach = tileKey(warp.x, warp.y + 1);
+    if (warp.y + 1 >= built.h || !seen.has(approach) || built.solid[warp.y + 1]?.[warp.x]) {
+      issues.push(`warp has no south approach: ${warp.label}`);
+    }
+  }
   return issues;
 }
 
-const MIN_REACHABLE_GRASS: Partial<Record<AreaId, number>> = {
+function exitsFor(area: AreaId): Partial<Record<Dir, ExitDef>> {
+  if (area.startsWith("biome-")) {
+    return { south: { to: "town", level: 0 } };
+  }
+  return AREAS[area as CoreAreaId].exits;
+}
+
+function minReachableGrass(area: AreaId): number {
+  if (area.startsWith("biome-")) {
+    return 40;
+  }
+  return MIN_REACHABLE_GRASS[area as CoreAreaId] ?? 0;
+}
+
+const MIN_REACHABLE_GRASS: Partial<Record<CoreAreaId, number>> = {
   town: 40,
   grove: 60,
   route1: 180,
   forest: 280,
+  beach: 24,
+  cave: 20,
 };
 
 function collisionSet(map: TiledMap): Set<number> {
@@ -618,6 +668,7 @@ class Draft {
       labels,
       gates,
       spots,
+      warps: [],
     };
     if (tint !== undefined) {
       map.tint = tint;
@@ -687,7 +738,7 @@ function mouthSpawn(dir: Dir, at: number, len: number, w: number, h: number): { 
   }
 }
 
-function mouthRect(dir: Dir, at: number, len: number, w: number, h: number): Rect {
+function mouthRect(dir: Dir, at: number, len: number, w: number, h: number): TileRect {
   switch (dir) {
     case "north":
       return { x: at, y: 0, w: len, h: 4 };
@@ -700,7 +751,7 @@ function mouthRect(dir: Dir, at: number, len: number, w: number, h: number): Rec
   }
 }
 
-function gateGraphic(rect: Rect, dir: Dir): MapGate {
+function gateGraphic(rect: TileRect, dir: Dir): MapGate {
   if (dir === "north") {
     return { x: rect.x * 32, y: 4, w: rect.w * 32, h: 6 };
   }
@@ -724,16 +775,16 @@ function signBeside(dir: Dir, at: number, len: number, w: number, h: number): { 
   return { x, y };
 }
 
-interface ScenicOpts {
+export interface GeneratedAreaSpec {
   w: number;
   h: number;
   ground?: number;
   mouths: Mouth[];
   trails: { x: number; y: number }[][];
   trailWidth: number;
-  grass?: Rect[];
-  ponds?: Rect[];
-  rooms?: Rect[];
+  grass?: TileRect[];
+  ponds?: TileRect[];
+  rooms?: TileRect[];
   treeDensity?: number;
   rockDensity?: number;
   salt: number;
@@ -741,11 +792,18 @@ interface ScenicOpts {
   shrine?: { x: number; y: number };
   extraLabels?: MapLabel[];
   tint?: number;
+  grassTint?: number;
   defaultDir: Dir;
   flowers?: boolean;
+  fences?: { x: number; y: number; len: number }[];
 }
 
-function buildScenic(opts: ScenicOpts): BuiltMap {
+/** Shared builder for the hand-made routes and the biome areas. */
+export function buildGeneratedArea(opts: GeneratedAreaSpec): BuiltMap {
+  return buildScenic(opts);
+}
+
+function buildScenic(opts: GeneratedAreaSpec): BuiltMap {
   const d = new Draft(opts.w, opts.h);
   // Trees, rocks, fences and signs. Water is forced solid in finish().
   d.collides = new Set<number>([T.treeTL, T.treeTR, T.treeBL, T.treeBR, T.fenceL, T.fenceM, T.fenceR, T.rock, T.sign]);
@@ -786,6 +844,9 @@ function buildScenic(opts: ScenicOpts): BuiltMap {
   if (opts.flowers) {
     d.flowers(opts.salt + 3);
   }
+  for (const fence of opts.fences ?? []) {
+    d.fenceH(fence.x, fence.y, fence.len);
+  }
   if ((opts.treeDensity ?? 0) > 0) {
     d.scatterTrees(opts.treeDensity ?? 0, opts.salt);
   }
@@ -808,7 +869,11 @@ function buildScenic(opts: ScenicOpts): BuiltMap {
   }
   const home = opts.mouths.find(m => m.dir === opts.defaultDir) ?? opts.mouths[0];
   const fallback = mouthSpawn(home.dir, home.at, home.len, opts.w, opts.h);
-  return d.toMap(spawns, spawns[opts.defaultDir] ?? fallback, labels, gates, opts.tint);
+  const map = d.toMap(spawns, spawns[opts.defaultDir] ?? fallback, labels, gates, opts.tint);
+  if (opts.grassTint !== undefined) {
+    map.grassTint = opts.grassTint;
+  }
+  return map;
 }
 
 function buildRoute(): BuiltMap {
@@ -951,10 +1016,17 @@ function buildBeach(): BuiltMap {
     ],
     trailWidth: 4,
     ponds: [{ x: 0, y: 24, w, h: h - 24 }],
+    grass: [
+      { x: 4, y: 6, w: 12, h: 8 },
+      { x: 26, y: 6, w: 12, h: 8 },
+      { x: 6, y: 16, w: 10, h: 6 },
+      { x: 26, y: 16, w: 12, h: 6 },
+    ],
     treeDensity: 0,
     rockDensity: 8,
     salt: 4,
     border: "tree",
+    grassTint: 0x49b0c8,
     defaultDir: "north",
   });
   return built;
@@ -978,10 +1050,17 @@ function buildCave(): BuiltMap {
     ],
     trailWidth: 4,
     rooms: [{ x: 14, y: 12, w: 12, h: 8 }],
+    grass: [
+      { x: 4, y: 6, w: 8, h: 6 },
+      { x: 28, y: 6, w: 6, h: 8 },
+      { x: 6, y: 20, w: 10, h: 6 },
+      { x: 28, y: 16, w: 6, h: 8 },
+    ],
     rockDensity: 22,
     salt: 17,
     border: "rock",
     tint: 0x8a7a9a,
+    grassTint: 0x6f9a62,
     defaultDir: "west",
   });
 }
@@ -994,7 +1073,7 @@ const SRC_H = 40;
 const TOWN_W = 76;
 const TOWN_H = 72;
 
-const COTTAGE: Rect = { x: 4, y: 30, w: 8, h: 6 };
+const COTTAGE: TileRect = { x: 4, y: 30, w: 8, h: 6 };
 
 function asShopKind(value: string | undefined): ShopKind | null {
   const key = value?.trim().toLowerCase();
@@ -1111,7 +1190,7 @@ function openDoorMats(draft: Draft, spots: readonly TownSpot[]): void {
 }
 
 /** Used when town.json never reached the Phaser cache (404 on a git deploy). Still walkable, same gates. */
-function buildTownFallback(): BuiltMap {
+function buildTownFallback(warps: readonly WarpRequest[]): BuiltMap {
   const built = buildScenic({
     w: TOWN_W,
     h: TOWN_H,
@@ -1152,12 +1231,13 @@ function buildTownFallback(): BuiltMap {
   for (const spot of built.spots) {
     plantNpc(built.solid, built.world, spot);
   }
+  carveWarpGate(built, warps);
   return built;
 }
 
-function buildTown(town: TiledMap | null): BuiltMap {
+function buildTown(town: TiledMap | null, warps: readonly WarpRequest[]): BuiltMap {
   if (!town) {
-    return buildTownFallback();
+    return buildTownFallback(warps);
   }
   const d = new Draft(TOWN_W, TOWN_H);
   d.collides = collisionSet(town);
@@ -1240,7 +1320,46 @@ function buildTown(town: TiledMap | null): BuiltMap {
     gateGraphic({ x: TOWN_W - 4, y: roadY, w: 4, h: 4 }, "east"),
   ];
   // Prefer the open square in front of the center buildings.
-  return d.toMap(spawns, { x: (OX + 20) * 32 + 16, y: (OY + 20) * 32 + 16 }, labels, gates, undefined, spots);
+  const built = d.toMap(spawns, { x: (OX + 20) * 32 + 16, y: (OY + 20) * 32 + 16 }, labels, gates, undefined, spots);
+  carveWarpGate(built, warps);
+  return built;
+}
+
+/**
+ * Pads just north of a walkway that joins the north road. The walkway is the
+ * approach, so crossing from one pad to the next is not required.
+ * At most eight pads fit beside the road without covering the Route 1 mouth.
+ */
+function carveWarpGate(built: BuiltMap, requests: readonly WarpRequest[]): void {
+  if (requests.length === 0) {
+    return;
+  }
+  const count = Math.min(8, requests.length);
+  for (let y = 12; y <= 13; y++) {
+    for (let x = 16; x < 56; x++) {
+      openCell(built, x, y);
+    }
+  }
+  built.labels.push({ x: 16, y: 13, label: "Biome gate", blocking: false });
+  for (let i = 0; i < count; i++) {
+    const x = 18 + i * 3;
+    const y = 11;
+    openCell(built, x, y);
+    const request = requests[i];
+    built.warps.push({ x, y, to: request.to, label: request.label });
+    built.labels.push({ x, y, label: request.label, blocking: false });
+  }
+}
+
+function openCell(built: BuiltMap, x: number, y: number): void {
+  if (y < 0 || x < 0 || y >= built.h || x >= built.w) {
+    return;
+  }
+  built.ground[y][x] = T.path;
+  built.world[y][x] = -1;
+  built.above[y][x] = -1;
+  built.grass[y][x] = false;
+  built.solid[y][x] = false;
 }
 
 function footprintOpen(built: BuiltMap, p: { x: number; y: number }): boolean {

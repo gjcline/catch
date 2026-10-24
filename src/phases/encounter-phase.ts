@@ -1,9 +1,11 @@
-import { enterTown, townEnabled } from "#app/catch/town-scene";
 import { applyAbAttrs } from "#abilities/apply-ab-attrs";
+import { consumeTownEncounter, speciesFromTownEncounter } from "#app/catch/town-biomes";
+import { enterTown, townEnabled } from "#app/catch/town-scene";
 import { PLAYER_PARTY_MAX_SIZE, WEIGHT_INCREMENT_ON_SPAWN_MISS } from "#app/constants";
 import { audioManager } from "#app/global-audio-manager";
 import { globalScene } from "#app/global-scene";
 import { settings } from "#app/global-settings-manager";
+import { speciesDataRegistry } from "#app/global-species-data-registry";
 import { getPokemonNameWithAffix } from "#app/messages";
 import { activeOverrides } from "#app/overrides";
 import { handleTutorial, Tutorial } from "#app/tutorial";
@@ -112,6 +114,9 @@ export class EncounterPhase extends BattlePhase {
 
     let totalBst = 0;
 
+    // Grass in a biome room, the Beach, or the Cave queued a species pool. Trainer waves ignore it.
+    const townEncounter = this.loaded ? null : consumeTownEncounter();
+
     battle.enemyLevels?.every((level, e) => {
       if (battle.isBattleMysteryEncounter()) {
         // Skip enemy loading for MEs, those are loaded elsewhere
@@ -122,6 +127,18 @@ export class EncounterPhase extends BattlePhase {
           battle.enemyParty[e] = battle.trainer?.genPartyMember(e)!; // TODO:: is the bang correct here?
         } else {
           let enemySpecies = globalScene.randomSpecies(battle.waveIndex, level, true);
+          if (
+            townEncounter
+            && !globalScene.gameMode.isBoss(battle.waveIndex)
+            && globalScene.arena.biomeId !== BiomeId.END
+          ) {
+            const picked = speciesFromTownEncounter(townEncounter, () => randSeedInt(1_000_000) / 1_000_000);
+            if (picked != null) {
+              const rolled = speciesDataRegistry.getSpecies(picked);
+              const evolved = rolled.getWildSpeciesForLevel(level, true, false, globalScene.gameMode);
+              enemySpecies = evolved === rolled.speciesId ? rolled : speciesDataRegistry.getSpecies(evolved);
+            }
+          }
           // If player has golden bug net, rolls 10% chance to replace non-boss wave wild species from the golden bug net bug pool
           if (
             globalScene.findModifier(m => m instanceof BoostBugSpawnModifier)
