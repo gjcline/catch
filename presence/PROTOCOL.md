@@ -13,9 +13,9 @@ Numbers `0`, `1`, `2`, `4`, `16`, and `22` match HUNT. `30` is CatchCrypt-only (
 
 ## Rooms
 
-One Node process and one Socket.IO namespace. Each overworld area is a room: `town`, `grove`, `route1`, `forest`, `beach`, `cave`. A player only receives spawn, move, and leave for the area they are in. Changing area is a new hello, not a move.
+One Node process and one Socket.IO namespace. Each overworld area is a room. The original rooms are `town`, `grove`, `route1`, `forest`, `beach`, and `cave`. Every other walkable biome is `biome-<slug>` (`biome-plains`, `biome-grass`, `biome-metropolis`, `biome-lake`, and the rest of the catalog). A player only receives spawn, move, and leave for the area they are in. Changing area is a new hello, not a move.
 
-Coordinates are pixel positions of the sprite center. Tiles are 32px. The server uses the same map sizes as `src/catch/town-maps.ts`:
+Coordinates are pixel positions of the sprite center. Tiles are 32px. Bounds come from [`area-tiles.json`](./area-tiles.json), which the town map builders import as well. Core rooms:
 
 | Area | Tiles | Pixels |
 | --- | --- | --- |
@@ -25,6 +25,8 @@ Coordinates are pixel positions of the sprite center. Tiles are 32px. The server
 | forest | 64×88 | 2048×2816 |
 | beach | 42×32 | 1344×1024 |
 | cave | 38×30 | 1216×960 |
+
+Biome rooms share a layout footprint: field 50×42, city 46×36, shore 48×36, cave 42×34, ridge 44×36. A hello for an id that is not in the catalog is refused.
 
 Facing is `front`, `back`, `left`, or `right` (the `misa-*` atlas frames).
 

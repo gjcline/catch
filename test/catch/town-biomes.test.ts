@@ -1,3 +1,4 @@
+import { areaTiles, BIOME_LAYOUTS, biomeLayout, CORE_AREA_TILES } from "#app/catch/overworld-areas";
 import {
   biomeAreaId,
   biomeBgKey,
@@ -19,13 +20,14 @@ import {
   TYPE_BIAS_CHANCE,
   townWarpRequests,
 } from "#app/catch/town-biomes";
-import { buildOverworld, overworldIssues, type TiledMap } from "#app/catch/town-maps";
+import { buildOverworld, type CoreAreaId, overworldIssues, type TiledMap } from "#app/catch/town-maps";
 import { BiomeId } from "#enums/biome-id";
 import { PokemonType } from "#enums/pokemon-type";
 import { SpeciesId } from "#enums/species-id";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
+import { AREA_TILES } from "../../presence/src/protocol.js";
 
 const town = JSON.parse(readFileSync("catchcrypt/public/town/town.json", "utf8")) as TiledMap;
 
@@ -93,6 +95,27 @@ describe("CatchCrypt biome overworld", () => {
       rooms.add(room);
       expect(biomeName(biomeId).length).toBeGreaterThan(0);
     }
+  });
+
+  it("shares every room's tile bounds with the presence server", () => {
+    const tiles = areaTiles();
+    expect(AREA_TILES).toEqual(tiles);
+
+    for (const id of Object.keys(CORE_AREA_TILES) as CoreAreaId[]) {
+      const built = buildOverworld(id, id === "town" ? town : null);
+      expect(built.w, id).toBe(tiles[id]?.w);
+      expect(built.h, id).toBe(tiles[id]?.h);
+    }
+
+    const slugs = new Set<string>();
+    for (const biomeId of overworldBiomeIds()) {
+      const slug = biomeSlug(biomeId);
+      slugs.add(slug);
+      const built = buildBiomeArea(biomeId);
+      expect(tiles[biomeAreaId(biomeId)], slug).toEqual({ w: built.w, h: built.h });
+      expect(biomeLayout(slug)).toBeTruthy();
+    }
+    expect(new Set(Object.keys(BIOME_LAYOUTS))).toEqual(slugs);
   });
 
   it("builds a walkable encounter area for every early biome and links them from town", () => {

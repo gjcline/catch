@@ -8,14 +8,16 @@ import { after, before, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { io } from "socket.io-client";
 import {
+  AREA_TILES,
   attemptStep,
   DEFAULT_SPRITE,
   inBounds,
   Op,
   parseHello,
+  SPRITE_IDS,
   sanitizeName,
   sanitizeSprite,
-  SPRITE_IDS,
+  TILE,
 } from "../src/protocol.js";
 import { createPresenceServer } from "../src/server.js";
 
@@ -64,6 +66,24 @@ describe("presence protocol helpers", () => {
     assert.equal(inBounds("town", 76 * 32 + 1, 10), false);
     assert.equal(inBounds("grove", 10, 10), true);
     assert.equal(inBounds("nope", 10, 10), false);
+    assert.equal(inBounds("biome-plains", 10, 10), true);
+    assert.equal(parseHello([Op.HELLO, "Ada", 32, 32, "front", "misa", "biome-plains"]).area, "biome-plains");
+    assert.equal(parseHello([Op.HELLO, "Ada", 50 * TILE + 1, 10, "front", "misa", "biome-plains"]), null);
+
+    const biomeRooms = Object.entries(AREA_TILES).filter(([area]) => area.startsWith("biome-"));
+    assert.equal(biomeRooms.length, 33);
+    for (const [area, tiles] of biomeRooms) {
+      assert.equal(inBounds(area, 0, 0), true, area);
+      assert.equal(inBounds(area, tiles.w * TILE, tiles.h * TILE), true, area);
+      assert.equal(inBounds(area, tiles.w * TILE + 1, 0), false, area);
+    }
+    assert.equal(AREA_TILES["biome-plains"].w, 50);
+    assert.equal(AREA_TILES["biome-grass"].h, 42);
+    assert.equal(AREA_TILES["biome-metropolis"].w, 46);
+    assert.equal(AREA_TILES["biome-lake"].w, 48);
+    assert.equal(AREA_TILES["biome-cave"].w, 42);
+    assert.equal(AREA_TILES["biome-beach"].w, 48);
+    assert.equal(AREA_TILES["biome-mountain"].h, 36);
   });
 
   it("keeps an allowlisted sprite and falls back without failing the hello", () => {
@@ -264,6 +284,56 @@ describe("two clients on the town", () => {
       assert.equal(welcome[7], "beach");
     } finally {
       client.socket.disconnect();
+      await delay(30);
+    }
+  });
+
+  it("lets two clients in a biome room see each other walk", async () => {
+    const ada = connect(url);
+    const bea = connect(url);
+    try {
+      assert.equal(await waitFor(ada.msgs, msg => msg === "go"), "go");
+      assert.equal(await waitFor(bea.msgs, msg => msg === "go"), "go");
+
+      hello(ada.socket, "Ada", 400, 400, "front", "biome-plains");
+      const adaWelcome = await waitFor(ada.msgs, msg => Array.isArray(msg) && msg[0] === Op.WELCOME);
+      assert.equal(adaWelcome[7], "biome-plains");
+
+      hello(bea.socket, "Bea", 460, 400, "left", "biome-plains");
+      const beaWelcome = await waitFor(bea.msgs, msg => Array.isArray(msg) && msg[0] === Op.WELCOME);
+      assert.equal(beaWelcome[7], "biome-plains");
+      const adaSeesBea = await waitFor(
+        ada.msgs,
+        msg => Array.isArray(msg) && msg[0] === Op.SPAWN && msg[1] === beaWelcome[1],
+      );
+      assert.equal(adaSeesBea[7], "biome-plains");
+
+      move(bea.socket, 490, 420, "right", "biome-plains");
+      const adaSeesMove = await waitFor(
+        ada.msgs,
+        msg => Array.isArray(msg) && msg[0] === Op.MOVE && msg[1] === beaWelcome[1],
+      );
+      assert.deepEqual(adaSeesMove, [Op.MOVE, beaWelcome[1], 490, 420, "right", "biome-plains"]);
+
+      move(ada.socket, 430, 400, "front", "biome-plains");
+      const beaSeesMove = await waitFor(
+        bea.msgs,
+        msg => Array.isArray(msg) && msg[0] === Op.MOVE && msg[1] === adaWelcome[1],
+      );
+      assert.deepEqual(beaSeesMove, [Op.MOVE, adaWelcome[1], 430, 400, "front", "biome-plains"]);
+
+      hello(ada.socket, "Ada", 200, 200, "front", "town");
+      const left = await waitFor(bea.msgs, msg => Array.isArray(msg) && msg[0] === Op.LEAVE);
+      assert.deepEqual(left, [Op.LEAVE, adaWelcome[1]]);
+      move(ada.socket, 230, 200, "right", "town");
+      await delay(40);
+      assert.equal(
+        bea.msgs.some(msg => Array.isArray(msg) && msg[0] === Op.MOVE),
+        false,
+      );
+    } finally {
+      ada.socket.disconnect();
+      bea.socket.disconnect();
       await delay(30);
     }
   });

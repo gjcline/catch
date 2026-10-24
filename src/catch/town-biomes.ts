@@ -6,6 +6,7 @@
  * and Ground.
  */
 
+import { BIOME_PREFIX, biomeLayout, layoutTiles } from "#app/catch/overworld-areas";
 import type { AreaId, BuiltMap, GeneratedAreaSpec, WarpRequest } from "#app/catch/town-maps";
 import { buildGeneratedArea } from "#app/catch/town-maps";
 import { globalScene } from "#app/global-scene";
@@ -38,11 +39,8 @@ export const CAVE_BIAS_TYPES = [PokemonType.ROCK] as const;
 export const BEACH_BIAS_TYPES = [PokemonType.WATER, PokemonType.GROUND] as const;
 export const TYPE_BIAS_CHANCE = 0.75;
 
-type Layout = "field" | "city" | "shore" | "cave" | "ridge";
-
 interface Theme {
   name: string;
-  layout: Layout;
   ground?: number;
   border: "tree" | "rock";
   tint?: number;
@@ -64,7 +62,6 @@ let pending: TownEncounterSpec | null = null;
 function field(name: string, extra: Partial<Theme> = {}): Theme {
   return {
     name,
-    layout: "field",
     border: "tree",
     treeDensity: 42,
     rockDensity: 0,
@@ -77,7 +74,6 @@ function field(name: string, extra: Partial<Theme> = {}): Theme {
 function city(name: string, extra: Partial<Theme> = {}): Theme {
   return {
     name,
-    layout: "city",
     ground: GROUND.path,
     border: "rock",
     treeDensity: 8,
@@ -91,7 +87,6 @@ function city(name: string, extra: Partial<Theme> = {}): Theme {
 function shore(name: string, extra: Partial<Theme> = {}): Theme {
   return {
     name,
-    layout: "shore",
     ground: GROUND.sand,
     border: "tree",
     treeDensity: 6,
@@ -105,7 +100,6 @@ function shore(name: string, extra: Partial<Theme> = {}): Theme {
 function cave(name: string, extra: Partial<Theme> = {}): Theme {
   return {
     name,
-    layout: "cave",
     ground: GROUND.sand,
     border: "rock",
     treeDensity: 0,
@@ -120,7 +114,6 @@ function cave(name: string, extra: Partial<Theme> = {}): Theme {
 function ridge(name: string, extra: Partial<Theme> = {}): Theme {
   return {
     name,
-    layout: "ridge",
     ground: GROUND.sand,
     border: "rock",
     treeDensity: 8,
@@ -205,7 +198,7 @@ export function biomeSlug(biomeId: BiomeId): string {
 
 /** Presence room id. One room per biome area, separate from town, route, beach, and cave. */
 export function biomeAreaId(biomeId: BiomeId): AreaId {
-  return `biome-${biomeSlug(biomeId)}`;
+  return `${BIOME_PREFIX}${biomeSlug(biomeId)}`;
 }
 
 export function presenceRoomId(area: AreaId): string {
@@ -213,10 +206,10 @@ export function presenceRoomId(area: AreaId): string {
 }
 
 export function biomeIdFromArea(area: string): BiomeId | null {
-  if (!area.startsWith("biome-")) {
+  if (!area.startsWith(BIOME_PREFIX)) {
     return null;
   }
-  const slug = area.slice("biome-".length);
+  const slug = area.slice(BIOME_PREFIX.length);
   for (const id of overworldBiomeIds()) {
     if (biomeSlug(id) === slug) {
       return id;
@@ -226,7 +219,7 @@ export function biomeIdFromArea(area: string): BiomeId | null {
 }
 
 export function isBiomeArea(area: AreaId): area is `biome-${string}` {
-  return area.startsWith("biome-");
+  return area.startsWith(BIOME_PREFIX);
 }
 
 export function biomeName(biomeId: BiomeId): string {
@@ -269,7 +262,8 @@ export function buildBiomeArea(biomeId: BiomeId): BuiltMap {
 
 function specFor(biomeId: BiomeId, theme: Theme): GeneratedAreaSpec {
   const salt = biomeId * 17 + 5;
-  switch (theme.layout) {
+  const layout = biomeLayout(biomeSlug(biomeId));
+  switch (layout) {
     case "city":
       return citySpec(theme, salt);
     case "shore":
@@ -278,8 +272,10 @@ function specFor(biomeId: BiomeId, theme: Theme): GeneratedAreaSpec {
       return caveSpec(theme, salt);
     case "ridge":
       return ridgeSpec(theme, salt);
-    default:
+    case "field":
       return fieldSpec(theme, salt, biomeId);
+    default:
+      throw new Error(`CatchCrypt has no overworld layout for ${biomeSlug(biomeId)}`);
   }
 }
 
@@ -309,7 +305,8 @@ function baseSpec(theme: Theme, salt: number, w: number, h: number, at: number):
 }
 
 function fieldSpec(theme: Theme, salt: number, biomeId: BiomeId): GeneratedAreaSpec {
-  const spec = baseSpec(theme, salt, 50, 42, 22);
+  const { w, h } = layoutTiles("field");
+  const spec = baseSpec(theme, salt, w, h, 22);
   spec.trails = [
     [
       { x: 25, y: 38 },
@@ -338,7 +335,8 @@ function fieldSpec(theme: Theme, salt: number, biomeId: BiomeId): GeneratedAreaS
 }
 
 function citySpec(theme: Theme, salt: number): GeneratedAreaSpec {
-  const spec = baseSpec(theme, salt, 46, 36, 20);
+  const { w, h } = layoutTiles("city");
+  const spec = baseSpec(theme, salt, w, h, 20);
   spec.trails = [
     [
       { x: 23, y: 32 },
@@ -373,7 +371,8 @@ function citySpec(theme: Theme, salt: number): GeneratedAreaSpec {
 }
 
 function shoreSpec(theme: Theme, salt: number, biomeId: BiomeId): GeneratedAreaSpec {
-  const spec = baseSpec(theme, salt, 48, 36, 21);
+  const { w, h } = layoutTiles("shore");
+  const spec = baseSpec(theme, salt, w, h, 21);
   spec.trails = [
     [
       { x: 24, y: 32 },
@@ -403,7 +402,8 @@ function shoreSpec(theme: Theme, salt: number, biomeId: BiomeId): GeneratedAreaS
 }
 
 function caveSpec(theme: Theme, salt: number): GeneratedAreaSpec {
-  const spec = baseSpec(theme, salt, 42, 34, 18);
+  const { w, h } = layoutTiles("cave");
+  const spec = baseSpec(theme, salt, w, h, 18);
   spec.trails = [
     [
       { x: 21, y: 30 },
@@ -427,7 +427,8 @@ function caveSpec(theme: Theme, salt: number): GeneratedAreaSpec {
 }
 
 function ridgeSpec(theme: Theme, salt: number): GeneratedAreaSpec {
-  const spec = baseSpec(theme, salt, 44, 36, 19);
+  const { w, h } = layoutTiles("ridge");
+  const spec = baseSpec(theme, salt, w, h, 19);
   spec.trails = [
     [
       { x: 22, y: 32 },
