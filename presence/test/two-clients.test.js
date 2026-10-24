@@ -7,7 +7,16 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { io } from "socket.io-client";
-import { attemptStep, DEFAULT_SPRITE, inBounds, Op, parseHello, sanitizeName, sanitizeSprite, SPRITE_IDS } from "../src/protocol.js";
+import {
+  attemptStep,
+  DEFAULT_SPRITE,
+  inBounds,
+  Op,
+  parseHello,
+  sanitizeName,
+  sanitizeSprite,
+  SPRITE_IDS,
+} from "../src/protocol.js";
 import { createPresenceServer } from "../src/server.js";
 
 async function waitFor(msgs, pred, timeout = 3000) {
@@ -58,13 +67,28 @@ describe("presence protocol helpers", () => {
   });
 
   it("keeps an allowlisted sprite and falls back without failing the hello", () => {
-    assert.deepEqual(SPRITE_IDS, ["misa", "misa-rose", "misa-sea", "misa-moss", "misa-gold", "misa-dusk"]);
+    assert.deepEqual(SPRITE_IDS, [
+      "misa",
+      "misa-rose",
+      "misa-sea",
+      "misa-moss",
+      "misa-gold",
+      "misa-dusk",
+      "lark",
+      "piper",
+      "reed",
+      "bram",
+      "nico",
+      "holt",
+    ]);
     assert.equal(sanitizeSprite("misa-gold"), "misa-gold");
     assert.equal(sanitizeSprite("not-a-sprite"), DEFAULT_SPRITE);
     assert.equal(sanitizeSprite(12), DEFAULT_SPRITE);
     assert.equal(sanitizeSprite(""), DEFAULT_SPRITE);
-    const chosen = parseHello([Op.HELLO, "Ada", 32, 32, "left", "misa-sea", "grove"]);
-    assert.equal(chosen.sprite, "misa-sea");
+    const chosen = parseHello([Op.HELLO, "Ada", 32, 32, "left", "reed", "grove"]);
+    assert.equal(chosen.sprite, "reed");
+    const sea = parseHello([Op.HELLO, "Ada", 32, 32, "left", "misa-sea", "grove"]);
+    assert.equal(sea.sprite, "misa-sea");
     const fallback = parseHello([Op.HELLO, "Ada", 32, 32, "left", "nope", "grove"]);
     assert.equal(fallback.sprite, "misa");
     assert.equal(fallback.area, "grove");
@@ -292,7 +316,10 @@ describe("character sprites", () => {
       assert.equal(redrawn[5], "right");
 
       hello(bea.socket, "Bea", 300, 220, "back", "town", "misa-dusk");
-      const changed = await waitFor(bea.msgs, msg => Array.isArray(msg) && msg[0] === Op.WELCOME && msg[6] === "misa-dusk");
+      const changed = await waitFor(
+        bea.msgs,
+        msg => Array.isArray(msg) && msg[0] === Op.WELCOME && msg[6] === "misa-dusk",
+      );
       assert.equal(changed[1], beaWelcome[1]);
       const dusk = await waitFor(
         ada.msgs,
