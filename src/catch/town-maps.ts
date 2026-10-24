@@ -22,13 +22,32 @@ export interface AreaDef {
 
 export interface TiledProperty {
   name: string;
+  type?: string;
   value: boolean | string | number;
+}
+
+export interface TiledObject {
+  id?: number;
+  name?: string;
+  type?: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  properties?: TiledProperty[];
+}
+
+export interface TiledLayer {
+  name: string;
+  type: string;
+  data?: number[];
+  objects?: TiledObject[];
 }
 
 export interface TiledMap {
   width: number;
   height: number;
-  layers: { name: string; type: string; data?: number[] }[];
+  layers: TiledLayer[];
   tilesets: { tiles?: { id: number; properties?: TiledProperty[] }[] }[];
 }
 
@@ -47,6 +66,21 @@ export interface MapGate {
   h: number;
 }
 
+/** A door or person you can talk to. Pixel rect in built-map space. */
+export type ShopKind = "center" | "mart" | "house" | "npc";
+
+export interface TownSpot {
+  id: string;
+  kind: ShopKind;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** One to three lines. Shops leave this empty and use their own menu. */
+  lines: string[];
+}
+
 export interface BuiltMap {
   w: number;
   h: number;
@@ -59,6 +93,8 @@ export interface BuiltMap {
   spawns: Partial<Record<Dir, { x: number; y: number }>>;
   labels: MapLabel[];
   gates: MapGate[];
+  /** Doors and people. Empty outside town. */
+  spots: TownSpot[];
   tint?: number;
 }
 
@@ -481,6 +517,22 @@ class Draft {
     }
   }
 
+  /** Clear props on a door mat and mark it walkable. Does not repaint the ground. */
+  openMat(x: number, y: number, w: number, h: number): void {
+    for (let yy = y; yy < y + h; yy++) {
+      for (let xx = x; xx < x + w; xx++) {
+        if (!this.in(xx, yy)) {
+          continue;
+        }
+        this.world[yy][xx] = -1;
+        this.above[yy][xx] = -1;
+        this.grass[yy][xx] = false;
+        this.water[yy][xx] = false;
+        this.path[yy][xx] = true;
+      }
+    }
+  }
+
   sign(x: number, y: number): void {
     if (!this.in(x, y)) {
       return;
@@ -551,6 +603,7 @@ class Draft {
     labels: MapLabel[],
     gates: MapGate[],
     tint?: number,
+    spots: TownSpot[] = [],
   ): BuiltMap {
     const map: BuiltMap = {
       w: this.w,
@@ -564,6 +617,7 @@ class Draft {
       spawns,
       labels,
       gates,
+      spots,
     };
     if (tint !== undefined) {
       map.tint = tint;
@@ -942,9 +996,123 @@ const TOWN_H = 72;
 
 const COTTAGE: Rect = { x: 4, y: 30, w: 8, h: 6 };
 
+function asShopKind(value: string | undefined): ShopKind | null {
+  const key = value?.trim().toLowerCase();
+  if (key === "center" || key === "mart" || key === "house" || key === "npc") {
+    return key;
+  }
+  return null;
+}
+
+function objectProp(obj: TiledObject, name: string): string | undefined {
+  const found = obj.properties?.find(prop => prop.name === name);
+  if (found === undefined || found.value === undefined || found.value === null) {
+    return undefined;
+  }
+  return String(found.value);
+}
+
+function defaultSpotName(kind: ShopKind): string {
+  if (kind === "center") {
+    return "Poké Center";
+  }
+  if (kind === "mart") {
+    return "Mart";
+  }
+  if (kind === "house") {
+    return "House";
+  }
+  return "Local";
+}
+
+function defaultSpotLines(kind: ShopKind): string[] {
+  if (kind === "house") {
+    return ["The house is quiet."];
+  }
+  if (kind === "npc") {
+    return ["They nod hello."];
+  }
+  return [];
+}
+
+/** Doors and people from town.json, shifted into the wrapped town. At most three talk lines. */
+export function spotsFromTiled(town: TiledMap, originX = 0, originY = 0): TownSpot[] {
+  const spots: TownSpot[] = [];
+  for (const layer of town.layers) {
+    if (layer.name !== "Doors" && layer.name !== "Npcs") {
+      continue;
+    }
+    for (const obj of layer.objects ?? []) {
+      const kind = asShopKind(objectProp(obj, "shop") ?? obj.type);
+      if (!kind) {
+        continue;
+      }
+      const parsed = (objectProp(obj, "lines") ?? "")
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .slice(0, 3);
+      const lines = parsed.length > 0 ? parsed : defaultSpotLines(kind);
+      const width = obj.width && obj.width > 0 ? obj.width : 32;
+      const height = obj.height && obj.height > 0 ? obj.height : 32;
+      spots.push({
+        id: `${kind}-${obj.id ?? spots.length}`,
+        kind,
+        name: obj.name && obj.name.trim().length > 0 ? obj.name : defaultSpotName(kind),
+        x: obj.x + originX,
+        y: obj.y + originY,
+        w: width,
+        h: height,
+        lines,
+      });
+    }
+  }
+  return spots;
+}
+
+function plantNpc(solid: boolean[][], world: number[][], spot: TownSpot): void {
+  if (spot.kind !== "npc") {
+    return;
+  }
+  const tx = Math.floor((spot.x + spot.w / 2) / 32);
+  const ty = Math.floor((spot.y + spot.h / 2) / 32);
+  if (solid[ty]?.[tx] === undefined) {
+    return;
+  }
+  world[ty][tx] = -1;
+  solid[ty][tx] = true;
+}
+
+function tileSpot(id: string, kind: ShopKind, name: string, tx: number, ty: number, lines: string[]): TownSpot {
+  return { id, kind, name, x: tx * 32, y: ty * 32, w: 32, h: 32, lines };
+}
+
+/** Counters for the walkable stand-in town, inside the square and off the roads. */
+function fallbackTownSpots(): TownSpot[] {
+  return [
+    tileSpot("center", "center", "Poké Center", 33, 31, []),
+    tileSpot("mart", "mart", "Mart", 42, 31, []),
+    tileSpot("house", "house", "House", 33, 33, ["A quiet house off the square."]),
+    tileSpot("npc", "npc", "Local", 42, 33, ["North leads to Route 1, once your team is ready."]),
+  ];
+}
+
+function openDoorMats(draft: Draft, spots: readonly TownSpot[]): void {
+  for (const spot of spots) {
+    if (spot.kind === "npc") {
+      continue;
+    }
+    const tx = Math.floor(spot.x / 32);
+    const ty = Math.floor(spot.y / 32);
+    const tw = Math.max(1, Math.round(spot.w / 32));
+    const th = Math.max(1, Math.round(spot.h / 32));
+    draft.openMat(tx, ty, tw, th);
+  }
+}
+
 /** Used when town.json never reached the Phaser cache (404 on a git deploy). Still walkable, same gates. */
 function buildTownFallback(): BuiltMap {
-  return buildScenic({
+  const built = buildScenic({
     w: TOWN_W,
     h: TOWN_H,
     mouths: [
@@ -980,6 +1148,11 @@ function buildTownFallback(): BuiltMap {
     defaultDir: "south",
     flowers: true,
   });
+  built.spots = fallbackTownSpots();
+  for (const spot of built.spots) {
+    plantNpc(built.solid, built.world, spot);
+  }
+  return built;
 }
 
 function buildTown(town: TiledMap | null): BuiltMap {
@@ -1047,7 +1220,12 @@ function buildTown(town: TiledMap | null): BuiltMap {
       d.sign(label.x, label.y);
     }
   }
+  const spots = spotsFromTiled(town, OX * 32, OY * 32);
+  openDoorMats(d, spots);
   d.finish();
+  for (const spot of spots) {
+    plantNpc(d.solid, d.world, spot);
+  }
 
   const spawns: Partial<Record<Dir, { x: number; y: number }>> = {
     north: { x: spanCenter(northX, 6), y: 48 },
@@ -1062,7 +1240,7 @@ function buildTown(town: TiledMap | null): BuiltMap {
     gateGraphic({ x: TOWN_W - 4, y: roadY, w: 4, h: 4 }, "east"),
   ];
   // Prefer the open square in front of the center buildings.
-  return d.toMap(spawns, { x: (OX + 20) * 32 + 16, y: (OY + 20) * 32 + 16 }, labels, gates);
+  return d.toMap(spawns, { x: (OX + 20) * 32 + 16, y: (OY + 20) * 32 + 16 }, labels, gates, undefined, spots);
 }
 
 function footprintOpen(built: BuiltMap, p: { x: number; y: number }): boolean {
