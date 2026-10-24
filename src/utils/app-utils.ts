@@ -1,6 +1,18 @@
 /** @returns Whether the device has a touchscreen */
 export function hasTouchscreen(): boolean {
-  return window.matchMedia("(hover: none), (pointer: coarse)").matches;
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  if (window.matchMedia("(hover: none), (pointer: coarse)").matches) {
+    return true;
+  }
+  // iPadOS desktop mode reports a Mac with a fine pointer and still has no mouse.
+  const touchPoints = navigator.maxTouchPoints ?? 0;
+  if (navigator.platform === "MacIntel" && touchPoints > 1) {
+    return true;
+  }
+  const ua = navigator.userAgent || "";
+  return touchPoints > 0 && /iPhone|iPad|Android|Mobile/i.test(ua);
 }
 
 /**

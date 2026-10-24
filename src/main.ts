@@ -2,6 +2,7 @@ import "#app/polyfills"; // All polyfills MUST be loaded first for side effects
 import "#init/init-manifest"; // initializes the manifest, must be done *before* i18n is initialized due to being used for caching
 import "#app/i18n"; // Initializes i18n on import
 
+import { installMobileViewport } from "#app/catch/mobile-viewport";
 import { InvertPostFX } from "#app/pipelines/invert";
 import { isMobile, preventDoubleTapZoom } from "#app/touch-controls";
 import { isBeta, isDev } from "#constants/app-constants";
@@ -82,6 +83,7 @@ async function startGame(): Promise<void> {
     version,
   });
   game.sound.pauseOnBlur = isMobile();
+  installMobileViewport(game);
 }
 
 try {

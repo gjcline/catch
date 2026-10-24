@@ -54,6 +54,7 @@ import {
   townKeyAction,
   townShouldMove,
 } from "#app/catch/town-shops";
+import { type Cardinal, setBattleTouchSuppressed, stepPixels, TownTouchUi, walkAxis } from "#app/catch/town-touch";
 import { globalScene } from "#app/global-scene";
 import { modifierTypes } from "#data/data-lists";
 import { MAX_PER_TYPE_POKEBALLS } from "#data/pokeball";
@@ -62,6 +63,7 @@ import { PartyUiMode } from "#enums/party-ui-mode";
 import { PokeballType } from "#enums/pokeball";
 import { UiMode } from "#enums/ui-mode";
 import { AddPokeballModifier } from "#modifiers/modifier";
+import { hasTouchscreen } from "#utils/app-utils";
 import { applyChallenges } from "#utils/challenge-utils";
 import { BooleanHolder } from "#utils/common";
 import Phaser from "phaser";
@@ -98,7 +100,14 @@ export class TownScene extends Phaser.Scene {
   private mapW = 0;
   private mapH = 0;
   private area: AreaId = "town";
-  private keys!: Record<"up" | "down" | "left" | "right" | "w" | "a" | "s" | "d", Phaser.Input.Keyboard.Key>;
+  private keys!: Record<"up" | "down" | "left" | "right" | "w" | "a" | "s" | "d", { isDown: boolean }>;
+  private touchUi = false;
+  private townTouch?: TownTouchUi;
+  private touchDir: Cardinal | null = null;
+  private padHeld: Cardinal | null = null;
+  private padRepeatAt = 0;
+  private wasHidden = false;
+  private lifeBound = false;
   private leaving = false;
   private switching = false;
   private partyOpen = false;
@@ -192,9 +201,50 @@ export class TownScene extends Phaser.Scene {
     this.grassReadyAt = this.time.now + 1500;
     cam.setZoom(2).setBounds(0, 0, this.mapW, this.mapH).startFollow(this.player, true);
     cam.fadeIn(250, 0, 0, 0);
-    const kb = this.input.keyboard!;
-    const k = kb.addKeys("UP,DOWN,LEFT,RIGHT,W,A,S,D") as any;
+    this.touchUi = hasTouchscreen();
+    if (this.touchUi) {
+      cam.roundPixels = true;
+    }
+    this.bindKeys();
+    if (this.touchUi) {
+      this.mountTouch();
+    } else {
+      this.mountPointerHud(cam);
+    }
+    this.showBanner();
+    (window as any).__ccArea = this.area;
+    this.attachPresence();
+  }
+
+  /** Keyboard still works on a phone with a keyboard attached. A missing plugin must not blank the town. */
+  private bindKeys() {
+    const idle = { isDown: false };
+    this.keys = { up: idle, down: idle, left: idle, right: idle, w: idle, a: idle, s: idle, d: idle };
+    const kb = this.input.keyboard;
+    if (!kb) {
+      return;
+    }
+    const k = kb.addKeys("UP,DOWN,LEFT,RIGHT,W,A,S,D") as Record<string, { isDown: boolean }>;
     this.keys = { up: k.UP, down: k.DOWN, left: k.LEFT, right: k.RIGHT, w: k.W, a: k.A, s: k.S, d: k.D };
+    kb.on("keydown-P", () => this.openParty());
+    kb.on("keydown-C", () => this.openPicker());
+    kb.on("keydown-B", () => this.onTownKey("b"));
+    kb.on("keydown-ESC", () => this.onTownKey("esc"));
+    kb.on("keydown-SPACE", () => this.onTownKey("space"));
+    kb.on("keydown-Z", () => this.onTownKey("z"));
+    kb.on("keydown-ENTER", () => this.onTownKey("enter"));
+    kb.on("keydown-UP", () => this.nudgeMenu(-1));
+    kb.on("keydown-DOWN", () => this.nudgeMenu(1));
+    kb.on("keydown-W", () => this.nudgeMenu(-1));
+    kb.on("keydown-S", () => this.nudgeMenu(1));
+    kb.on("keydown-LEFT", () => this.onPickerStep(-1));
+    kb.on("keydown-RIGHT", () => this.onPickerStep(1));
+    kb.on("keydown-A", () => this.onPickerStep(-1));
+    kb.on("keydown-D", () => this.onPickerStep(1));
+  }
+
+  /** Mouse HUD. Touch devices use the DOM pad instead, sized in CSS pixels. */
+  private mountPointerHud(cam: Phaser.Cameras.Scene2D.Camera) {
     const { width, height } = this.scale;
     const btn = this.add
       .text(width - 40, height - 40, "BATTLE", {
@@ -243,21 +293,6 @@ export class TownScene extends Phaser.Scene {
       .setName("character-button");
     cbtn.setScale(1 / cam.zoom).setPosition(pbtn.x - pbtn.displayWidth - 6 / cam.zoom, btn.y);
     cbtn.on("pointerdown", () => this.openPicker());
-    kb.on("keydown-P", () => this.openParty());
-    kb.on("keydown-C", () => this.openPicker());
-    kb.on("keydown-B", () => this.onTownKey("b"));
-    kb.on("keydown-ESC", () => this.onTownKey("esc"));
-    kb.on("keydown-SPACE", () => this.onTownKey("space"));
-    kb.on("keydown-Z", () => this.onTownKey("z"));
-    kb.on("keydown-ENTER", () => this.onTownKey("enter"));
-    kb.on("keydown-UP", () => this.nudgeMenu(-1));
-    kb.on("keydown-DOWN", () => this.nudgeMenu(1));
-    kb.on("keydown-W", () => this.nudgeMenu(-1));
-    kb.on("keydown-S", () => this.nudgeMenu(1));
-    kb.on("keydown-LEFT", () => this.onPickerStep(-1));
-    kb.on("keydown-RIGHT", () => this.onPickerStep(1));
-    kb.on("keydown-A", () => this.onPickerStep(-1));
-    kb.on("keydown-D", () => this.onPickerStep(1));
     this.add
       .text(
         width / 2 - (width / 2 - 20) / cam.zoom,
@@ -276,9 +311,113 @@ export class TownScene extends Phaser.Scene {
       .setDepth(100)
       .setScale(1 / cam.zoom)
       .setName("town-hint");
-    this.showBanner();
-    (window as any).__ccArea = this.area;
-    this.attachPresence();
+  }
+
+  /** D-pad, A, and B. Battle touch controls stay hidden until the party screen needs them. */
+  private mountTouch() {
+    this.townTouch?.destroy();
+    document.getElementById("touchControls")?.classList.add("visible");
+    setBattleTouchSuppressed(true);
+    this.townTouch = new TownTouchUi(document, {
+      onMove: dir => this.onTouchMove(dir),
+      onAction: () => this.onTownKey("space"),
+      onBack: () => this.onTownKey("b"),
+      onBattle: () => this.leave("button"),
+      onParty: () => this.openParty(),
+      onCharacter: () => this.openPicker(),
+      onMenuPick: index => this.onTouchPick(index),
+      onCharacterPick: index => this.onTouchCharacter(index),
+      onVariantPick: index => this.onTouchVariant(index),
+    });
+    this.townTouch.setPortrait(window.matchMedia?.("(orientation: portrait)")?.matches === true);
+  }
+
+  private onTouchMove(dir: Cardinal | null) {
+    if (this.leaving || this.switching || this.partyOpen) {
+      this.touchDir = null;
+      this.padHeld = null;
+      return;
+    }
+    if (this.menu || this.picker) {
+      this.touchDir = null;
+      if (dir === this.padHeld) {
+        return;
+      }
+      this.padHeld = dir;
+      this.padRepeatAt = this.time.now + 360;
+      if (dir) {
+        this.applyPad(dir);
+      }
+      return;
+    }
+    this.padHeld = null;
+    this.touchDir = dir;
+  }
+
+  private onTouchPick(index: number) {
+    if (!this.menu || this.partyOpen || this.leaving) {
+      return;
+    }
+    this.menu.index = index;
+    this.confirmOpenMenu();
+  }
+
+  private onTouchCharacter(index: number) {
+    if (!this.picker || this.partyOpen || this.leaving) {
+      return;
+    }
+    if (this.picker.index === index) {
+      this.confirmPicker();
+      return;
+    }
+    this.picker.index = index;
+    this.picker.variant = 0;
+    this.renderPicker();
+  }
+
+  private onTouchVariant(index: number) {
+    if (!this.picker || this.leaving) {
+      return;
+    }
+    this.picker.variant = index;
+    this.renderPicker();
+  }
+
+  private repeatPad() {
+    if (!this.padHeld || (!this.menu && !this.picker)) {
+      return;
+    }
+    if (this.time.now < this.padRepeatAt) {
+      return;
+    }
+    this.padRepeatAt = this.time.now + 180;
+    this.applyPad(this.padHeld);
+  }
+
+  private applyPad(dir: Cardinal) {
+    if (this.picker) {
+      if (dir === "left") {
+        this.onPickerStep(-1);
+      } else if (dir === "right") {
+        this.onPickerStep(1);
+      } else if (dir === "up") {
+        this.onVariantStep(-1);
+      } else if (dir === "down") {
+        this.onVariantStep(1);
+      }
+      return;
+    }
+    if (this.menu) {
+      if (dir === "up") {
+        this.nudgeMenu(-1);
+      } else if (dir === "down") {
+        this.nudgeMenu(1);
+      }
+    }
+  }
+
+  private syncTouchOverlay() {
+    this.townTouch?.setOverlay({ menu: this.menu, picker: this.picker });
   }
 
   /** Area name card, using PokeRogue's own biome art for the generated areas. */
@@ -404,23 +543,30 @@ export class TownScene extends Phaser.Scene {
   }
 
   update(_t: number, dtMs: number) {
+    this.repeatPad();
     if (this.worldPaused()) {
       return;
     }
     const k = this.keys;
-    const sp = (150 * dtMs) / 1000;
+    const axis = walkAxis(
+      k.left.isDown || k.a.isDown || this.touchDir === "left",
+      k.right.isDown || k.d.isDown || this.touchDir === "right",
+      k.up.isDown || k.w.isDown || this.touchDir === "up",
+      k.down.isDown || k.s.isDown || this.touchDir === "down",
+    );
+    const sp = stepPixels(dtMs);
     let dx = 0;
     let dy = 0;
-    if (k.left.isDown || k.a.isDown) {
+    if (axis === "left") {
       dx = -sp;
       this.dir = "left";
-    } else if (k.right.isDown || k.d.isDown) {
+    } else if (axis === "right") {
       dx = sp;
       this.dir = "right";
-    } else if (k.up.isDown || k.w.isDown) {
+    } else if (axis === "up") {
       dy = -sp;
       this.dir = "back";
-    } else if (k.down.isDown || k.s.isDown) {
+    } else if (axis === "down") {
       dy = sp;
       this.dir = "front";
     }
@@ -527,7 +673,11 @@ export class TownScene extends Phaser.Scene {
     this.partyOpen = true;
     (window as any).__ccPartyOpen = true;
     this.input.keyboard?.resetKeys();
+    this.touchDir = null;
+    this.padHeld = null;
     this.player.anims.stop();
+    this.townTouch?.setHidden(true);
+    setBattleTouchSuppressed(false);
     const battle = battleRef;
     this.scene.pause();
     this.scene.setVisible(false);
@@ -544,6 +694,12 @@ export class TownScene extends Phaser.Scene {
         this.scene.resume();
         this.scene.setVisible(true);
         this.input.keyboard?.resetKeys();
+        this.touchDir = null;
+        this.padHeld = null;
+        if (this.touchUi) {
+          setBattleTouchSuppressed(true);
+          this.townTouch?.setHidden(false);
+        }
         // ignore the key that closed the party for a moment so it cannot also start the battle
         this.time.delayedCall(500, () => {
           this.partyOpen = false;
@@ -574,14 +730,101 @@ export class TownScene extends Phaser.Scene {
 
   /** Disconnect only when the scene is really going away. Area restarts set retainPresence. */
   private bindPresenceLifecycle() {
+    this.bindLife();
     this.events.once("shutdown", () => {
       const retain = this.retainPresence;
       this.retainPresence = false;
       this.clearRemotes();
+      this.destroyTouchUi();
       if (!retain) {
         this.releasePresence();
+        this.unbindLife();
       }
     });
+  }
+
+  private readonly onVisibility = () => {
+    if (document.visibilityState === "hidden") {
+      this.wasHidden = true;
+      this.touchDir = null;
+      this.padHeld = null;
+      this.townTouch?.release();
+      return;
+    }
+    this.afterForeground();
+  };
+
+  private readonly onPageShow = () => {
+    if (document.visibilityState === "visible") {
+      this.afterForeground();
+    }
+  };
+
+  private readonly onOnline = () => {
+    if (document.visibilityState !== "visible" || this.leaving || !this.player) {
+      return;
+    }
+    this.reconnectPresence();
+  };
+
+  private readonly onViewport = () => {
+    this.townTouch?.setPortrait(window.matchMedia?.("(orientation: portrait)")?.matches === true);
+  };
+
+  /** Phones drop the socket while the tab is frozen. A fresh hello puts this player back. */
+  private afterForeground() {
+    if (!this.wasHidden || this.leaving || !this.player) {
+      return;
+    }
+    this.wasHidden = false;
+    this.reconnectPresence();
+  }
+
+  private reconnectPresence() {
+    try {
+      this.presence?.reconnect({
+        name: this.presenceName(),
+        x: this.player.x,
+        y: this.player.y,
+        facing: this.dir,
+        sprite: this.spriteId,
+        area: this.area,
+      });
+    } catch (err) {
+      console.error("CatchCrypt: presence reconnect failed", err);
+    }
+  }
+
+  private bindLife() {
+    if (this.lifeBound) {
+      return;
+    }
+    this.lifeBound = true;
+    document.addEventListener("visibilitychange", this.onVisibility);
+    window.addEventListener("pageshow", this.onPageShow);
+    window.addEventListener("online", this.onOnline);
+    window.addEventListener("resize", this.onViewport);
+    window.addEventListener("orientationchange", this.onViewport);
+  }
+
+  private unbindLife() {
+    if (!this.lifeBound) {
+      return;
+    }
+    this.lifeBound = false;
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    window.removeEventListener("pageshow", this.onPageShow);
+    window.removeEventListener("online", this.onOnline);
+    window.removeEventListener("resize", this.onViewport);
+    window.removeEventListener("orientationchange", this.onViewport);
+  }
+
+  private destroyTouchUi() {
+    this.townTouch?.destroy();
+    this.townTouch = undefined;
+    this.touchDir = null;
+    this.padHeld = null;
+    setBattleTouchSuppressed(false);
   }
 
   private attachPresence() {
@@ -877,6 +1120,7 @@ export class TownScene extends Phaser.Scene {
     this.menuRoot = undefined;
     (window as any).__ccTownMenu = null;
     this.input.keyboard?.resetKeys();
+    this.syncTouchOverlay();
   }
 
   private onPickerStep(dir: -1 | 1) {
@@ -915,6 +1159,7 @@ export class TownScene extends Phaser.Scene {
     this.pickerRoot = undefined;
     (window as any).__ccPicker = false;
     this.input.keyboard?.resetKeys();
+    this.syncTouchOverlay();
   }
 
   private confirmPicker() {
@@ -1094,7 +1339,8 @@ export class TownScene extends Phaser.Scene {
     this.menuRoot?.destroy(true);
     this.menuRoot = undefined;
     const menu = this.menu;
-    if (!menu) {
+    this.syncTouchOverlay();
+    if (!menu || this.touchUi) {
       return;
     }
     const cam = this.cameras.main;
@@ -1169,7 +1415,8 @@ export class TownScene extends Phaser.Scene {
     this.pickerRoot?.destroy(true);
     this.pickerRoot = undefined;
     const picker = this.picker;
-    if (!picker) {
+    this.syncTouchOverlay();
+    if (!picker || this.touchUi) {
       return;
     }
     const selected = selectedTownCharacter(picker);
