@@ -4,11 +4,45 @@
  * Movement is a small grid-free walker with tile collision, modeled on that repo's Player.js.
  */
 import { loggedInUser } from "#app/account";
-import { AREAS, type AreaId, type BuiltMap, buildOverworld, type Dir, tiledFromCache } from "#app/catch/town-maps";
+import {
+  AREAS,
+  type AreaId,
+  type BuiltMap,
+  buildOverworld,
+  type Dir,
+  type TownSpot,
+  tiledFromCache,
+} from "#app/catch/town-maps";
 import { type Facing, type PresenceMove, type PresencePeer, TownPresence } from "#app/catch/town-presence";
+import {
+  confirmTownMenu,
+  doorUnderFeet,
+  healTownParty,
+  type MartItemId,
+  martTitle,
+  moveTownMenu,
+  openTownMenu,
+  potionTarget,
+  readMoney,
+  resolveBuy,
+  spotAt,
+  spotForAction,
+  type TownMenu,
+  type TownWallet,
+  tileAhead,
+  townKeyAction,
+  townShouldMove,
+} from "#app/catch/town-shops";
 import { globalScene } from "#app/global-scene";
+import { modifierTypes } from "#data/data-lists";
+import { MAX_PER_TYPE_POKEBALLS } from "#data/pokeball";
+import { ChallengeType } from "#enums/challenge-type";
 import { PartyUiMode } from "#enums/party-ui-mode";
+import { PokeballType } from "#enums/pokeball";
 import { UiMode } from "#enums/ui-mode";
+import { AddPokeballModifier } from "#modifiers/modifier";
+import { applyChallenges } from "#utils/challenge-utils";
+import { BooleanHolder } from "#utils/common";
 import Phaser from "phaser";
 
 const KEY = "catchcrypt_town";
@@ -47,6 +81,12 @@ export class TownScene extends Phaser.Scene {
   private leaving = false;
   private switching = false;
   private partyOpen = false;
+  private menu: TownMenu | null = null;
+  private menuRoot: Phaser.GameObjects.Container | undefined;
+  private spots: TownSpot[] = [];
+  private wallet: TownWallet = { money: null, freeTaken: {} };
+  /** Door or person already opened, so holding into them does not reopen the menu. */
+  private doorLatch: string | null = null;
   private grassAt: (tx: number, ty: number) => boolean = () => false;
   private lastTileKey = "";
   private grassReadyAt = 0;
@@ -95,11 +135,18 @@ export class TownScene extends Phaser.Scene {
     this.bindPresenceLifecycle();
     this.leaving = false;
     this.switching = false;
+    this.menu = null;
+    this.menuRoot = undefined;
+    this.doorLatch = null;
+    this.wallet = { money: this.currentMoney(), freeTaken: {} };
+    (window as any).__ccTownMenu = null;
     this.clearRemotes();
     this.area = data?.area ?? lastArea;
     lastArea = this.area;
     const built = buildOverworld(this.area, tiledFromCache(this.cache.tilemap.get("cc_town")));
     this.paint(built);
+    this.spots = built.spots;
+    this.drawSpots();
     const entrance = (data?.from && built.spawns[data.from]) || built.defaultSpawn;
     const start = data?.from ? entrance : (lastPos ?? entrance);
     this.player = this.add.sprite(start.x, start.y, "cc_player", `misa-${this.dir}`).setDepth(5);
@@ -160,17 +207,20 @@ export class TownScene extends Phaser.Scene {
     pbtn.setScale(1 / cam.zoom).setPosition(btn.x - btn.displayWidth - 6 / cam.zoom, btn.y);
     pbtn.on("pointerdown", () => this.openParty());
     kb.on("keydown-P", () => this.openParty());
-    kb.on("keydown-B", () => this.leave("button"));
-    kb.on("keydown-ESC", () => {
-      if (!this.partyOpen) {
-        this.leave("button");
-      }
-    });
+    kb.on("keydown-B", () => this.onTownKey("b"));
+    kb.on("keydown-ESC", () => this.onTownKey("esc"));
+    kb.on("keydown-SPACE", () => this.onTownKey("space"));
+    kb.on("keydown-Z", () => this.onTownKey("z"));
+    kb.on("keydown-ENTER", () => this.onTownKey("enter"));
+    kb.on("keydown-UP", () => this.nudgeMenu(-1));
+    kb.on("keydown-DOWN", () => this.nudgeMenu(1));
+    kb.on("keydown-W", () => this.nudgeMenu(-1));
+    kb.on("keydown-S", () => this.nudgeMenu(1));
     this.add
       .text(
         width / 2 - (width / 2 - 20) / cam.zoom,
         height / 2 + (height / 2 - 20) / cam.zoom,
-        "Arrows or WASD to walk.  P for your Pokémon.  Battle, B or Esc for the next wave.",
+        "Arrows or WASD to walk.  Space or Z at a door.  P for your Pokémon.  Battle, B or Esc for the next wave.",
         {
           fontFamily: "emerald, monospace",
           fontSize: "36px",
@@ -312,7 +362,7 @@ export class TownScene extends Phaser.Scene {
   }
 
   update(_t: number, dtMs: number) {
-    if (this.leaving || this.switching || this.partyOpen) {
+    if (this.worldPaused()) {
       return;
     }
     const k = this.keys;
@@ -344,10 +394,17 @@ export class TownScene extends Phaser.Scene {
       } else if (!this.blocked(nx - 10, foot) && !this.blocked(nx + 10, foot)) {
         p.setPosition(nx, ny);
         this.emitPresence();
-        this.grassStep(p.x, p.y + 14);
+        this.tryAutoDoor();
+        if (!this.menu) {
+          this.grassStep(p.x, p.y + 14);
+        }
+      } else if (!edge) {
+        this.tryBumpNpc();
       }
-      p.anims.play(`cc-${this.dir}`, true);
-    } else {
+      if (!this.menu) {
+        p.anims.play(`cc-${this.dir}`, true);
+      }
+    } else if (!this.menu) {
       p.anims.stop();
       p.setFrame(`misa-${this.dir}`);
     }
@@ -422,7 +479,7 @@ export class TownScene extends Phaser.Scene {
 
   /** Show PokeRogue's own party screen (check mode: summary, moves, reorder) over a paused town. */
   openParty() {
-    if (this.leaving || this.switching || this.partyOpen || !battleRef) {
+    if (this.leaving || this.switching || this.partyOpen || this.menu || !battleRef) {
       return;
     }
     this.partyOpen = true;
@@ -520,8 +577,11 @@ export class TownScene extends Phaser.Scene {
     return username && username.length > 0 ? username : "Guest";
   }
 
-  /** Throttled inside TownPresence. Skipped while the party screen or an area fade has update() paused. */
+  /** Throttled inside TownPresence. Skipped while a menu, the party screen, or an area fade pauses update(). */
   private emitPresence() {
+    if (this.worldPaused()) {
+      return;
+    }
     this.presence?.move({
       x: this.player.x,
       y: this.player.y,
@@ -613,11 +673,395 @@ export class TownScene extends Phaser.Scene {
     }
   }
 
+  /** Walking, grass, and presence all wait while a menu is open. */
+  private worldPaused(): boolean {
+    return !townShouldMove({
+      leaving: this.leaving,
+      switching: this.switching,
+      partyOpen: this.partyOpen,
+      menuOpen: this.menu !== null,
+    });
+  }
+
+  private currentMoney(): number | null {
+    try {
+      return readMoney(globalScene.money);
+    } catch (err) {
+      console.error("CatchCrypt: money unreadable", err);
+      return null;
+    }
+  }
+
+  private onTownKey(key: string) {
+    if (this.leaving || this.switching || this.partyOpen) {
+      return;
+    }
+    const action = townKeyAction(key, this.menu !== null);
+    if (action === "close") {
+      this.closeMenu();
+      return;
+    }
+    if (action === "leave") {
+      this.leave("button");
+      return;
+    }
+    if (action === "confirm") {
+      this.confirmOpenMenu();
+      return;
+    }
+    if (action === "open") {
+      this.interact();
+    }
+  }
+
+  private nudgeMenu(dir: -1 | 1) {
+    if (!this.menu || this.leaving || this.switching || this.partyOpen) {
+      return;
+    }
+    moveTownMenu(this.menu, dir);
+    this.renderMenu();
+  }
+
+  /** Step onto a center, mart, or house mat. */
+  private tryAutoDoor() {
+    const door = doorUnderFeet(this.spots, this.player.x, this.player.y);
+    if (!door) {
+      this.doorLatch = null;
+      return;
+    }
+    if (this.doorLatch === door.id) {
+      return;
+    }
+    this.openSpot(door);
+  }
+
+  /** Walk into a person. Their tile is solid, so the step itself never lands. */
+  private tryBumpNpc() {
+    const ahead = tileAhead(this.player.x, this.player.y, this.dir);
+    const npc = spotAt(this.spots, ahead.x, ahead.y, ["npc"]);
+    if (!npc || this.doorLatch === npc.id) {
+      return;
+    }
+    this.openSpot(npc);
+  }
+
+  private interact() {
+    if (this.menu) {
+      this.confirmOpenMenu();
+      return;
+    }
+    const spot = spotForAction(this.spots, this.player.x, this.player.y, this.dir);
+    if (spot) {
+      this.openSpot(spot);
+    }
+  }
+
+  private openSpot(spot: TownSpot) {
+    if (this.leaving || this.switching || this.partyOpen) {
+      return;
+    }
+    this.wallet = { ...this.wallet, money: this.currentMoney() };
+    this.menu = openTownMenu(spot, this.wallet.money);
+    this.doorLatch = spot.id;
+    this.player.anims.stop();
+    this.player.setFrame(`misa-${this.dir}`);
+    this.input.keyboard?.resetKeys();
+    (window as any).__ccTownMenu = spot.kind;
+    (window as any).__ccTownMenuName = spot.name;
+    this.renderMenu();
+  }
+
+  private closeMenu() {
+    this.menu = null;
+    this.menuRoot?.destroy(true);
+    this.menuRoot = undefined;
+    (window as any).__ccTownMenu = null;
+    this.input.keyboard?.resetKeys();
+  }
+
+  private confirmOpenMenu() {
+    if (!this.menu) {
+      return;
+    }
+    const result = confirmTownMenu(this.menu);
+    if (result.type === "close") {
+      this.closeMenu();
+      return;
+    }
+    if (result.type === "heal") {
+      this.menu.message = this.healParty();
+      this.renderMenu();
+      return;
+    }
+    if (result.type === "buy") {
+      this.menu.message = this.buyItem(result.itemId);
+      this.renderMenu();
+      return;
+    }
+    this.renderMenu();
+  }
+
+  private healParty(): string {
+    try {
+      const party = globalScene.getPlayerParty();
+      if (!party || party.length === 0) {
+        return "You don't have any Pokémon with you.";
+      }
+      const prevent = new BooleanHolder(false);
+      applyChallenges(ChallengeType.PREVENT_REVIVE, prevent);
+      const healed = healTownParty(party, mon => !(prevent.value && mon.isFainted()));
+      if (healed === 0) {
+        return "There is nobody here the nurse can heal.";
+      }
+      return "Your Pokémon are fully healed.";
+    } catch (err) {
+      console.error("CatchCrypt: heal failed", err);
+      return "The nurse cannot reach your party right now.";
+    }
+  }
+
+  private buyItem(itemId: MartItemId): string {
+    if (itemId === "potion" && this.partyNeedsPotion() === false) {
+      return "Your party doesn't need a Potion right now.";
+    }
+    if (itemId === "pokeball" && this.pokeballBagFull()) {
+      return "You cannot carry any more Poké Balls.";
+    }
+    const before = this.wallet.money;
+    const result = resolveBuy(
+      this.wallet,
+      itemId,
+      () => (itemId === "pokeball" ? this.grantPokeball() : this.grantPotion()),
+      "The mart is out of those right now.",
+    );
+    this.wallet = result.wallet;
+    if (result.wallet.money !== before) {
+      this.writeMoney();
+    }
+    if (this.menu?.spot.kind === "mart") {
+      this.menu.title = martTitle(this.wallet.money);
+    }
+    return result.message;
+  }
+
+  private partyNeedsPotion(): boolean | null {
+    try {
+      return potionTarget(globalScene.getPlayerParty()) !== null;
+    } catch (err) {
+      console.error("CatchCrypt: party check failed", err);
+      return null;
+    }
+  }
+
+  private pokeballBagFull(): boolean {
+    try {
+      const counts = globalScene.pokeballCounts;
+      if (!counts) {
+        return false;
+      }
+      return (counts[PokeballType.POKEBALL] ?? 0) >= MAX_PER_TYPE_POKEBALLS;
+    } catch {
+      return false;
+    }
+  }
+
+  private grantPokeball(): boolean {
+    try {
+      const make = modifierTypes.POKEBALL;
+      if (typeof make !== "function") {
+        return false;
+      }
+      const modifier = new AddPokeballModifier(make(), PokeballType.POKEBALL, 1);
+      return globalScene.addModifier(modifier, true, false, false, true);
+    } catch (err) {
+      console.error("CatchCrypt: pokeball failed", err);
+      return false;
+    }
+  }
+
+  private grantPotion(): boolean {
+    try {
+      const party = globalScene.getPlayerParty();
+      const target = potionTarget(party);
+      if (!target) {
+        return false;
+      }
+      const make = modifierTypes.POTION;
+      if (typeof make !== "function") {
+        return false;
+      }
+      const modifier = make().newModifier(target);
+      if (!modifier) {
+        return false;
+      }
+      return globalScene.addModifier(modifier, true, false, false, true);
+    } catch (err) {
+      console.error("CatchCrypt: potion failed", err);
+      return false;
+    }
+  }
+
+  private writeMoney() {
+    if (this.wallet.money === null) {
+      return;
+    }
+    try {
+      globalScene.money = this.wallet.money;
+      globalScene.updateMoneyText(false);
+      globalScene.animateMoneyChanged(false);
+    } catch (err) {
+      console.error("CatchCrypt: money update failed", err);
+    }
+  }
+
+  private renderMenu() {
+    this.menuRoot?.destroy(true);
+    this.menuRoot = undefined;
+    const menu = this.menu;
+    if (!menu) {
+      return;
+    }
+    const cam = this.cameras.main;
+    const { width, height } = this.scale;
+    const scale = 1 / cam.zoom;
+    const panelW = 640;
+    const panelH = 168 + menu.options.length * 48;
+    const screenLeft = (width - panelW * scale) / 2;
+    const screenTop = (height - panelH * scale) / 2;
+    const originX = width / 2 + (screenLeft - width / 2) / cam.zoom;
+    const originY = height / 2 + (screenTop - height / 2) / cam.zoom;
+    const root = this.add.container(originX, originY).setScrollFactor(0).setDepth(200).setScale(scale);
+    root.setName("town-menu");
+    const accent = menuAccent(menu.spot.kind);
+    const bg = this.add.graphics();
+    bg.fillStyle(0x1b2440, 0.94);
+    bg.fillRoundedRect(0, 0, panelW, panelH, 12);
+    bg.lineStyle(4, accent.border, 1);
+    bg.strokeRoundedRect(0, 0, panelW, panelH, 12);
+    root.add(bg);
+    const titleColor = accent.title;
+    root.add(
+      this.add.text(28, 18, menu.title, {
+        fontFamily: "emerald, monospace",
+        fontSize: "40px",
+        color: titleColor,
+      }),
+    );
+    root.add(
+      this.add.text(28, 68, menu.message, {
+        fontFamily: "emerald, monospace",
+        fontSize: "28px",
+        color: "#ffffff",
+        wordWrap: { width: panelW - 56 },
+      }),
+    );
+    for (let index = 0; index < menu.options.length; index++) {
+      const option = menu.options[index];
+      const rowY = 124 + index * 48;
+      const selected = index === menu.index;
+      const hit = this.add
+        .rectangle(panelW / 2, rowY + 18, panelW - 36, 42, selected ? 0x31406e : 0x000000, selected ? 1 : 0.15)
+        .setInteractive({ useHandCursor: true });
+      hit.on("pointerdown", () => {
+        if (!this.menu || this.partyOpen) {
+          return;
+        }
+        this.menu.index = index;
+        this.confirmOpenMenu();
+      });
+      root.add(hit);
+      root.add(
+        this.add.text(40, rowY, `${selected ? "> " : "  "}${option.label}`, {
+          fontFamily: "emerald, monospace",
+          fontSize: "32px",
+          color: selected ? "#ffe08a" : "#ffffff",
+        }),
+      );
+    }
+    root.add(
+      this.add.text(28, panelH - 36, "Arrows choose.  Space confirms.  B or Esc closes.", {
+        fontFamily: "emerald, monospace",
+        fontSize: "22px",
+        color: "#c5cbe0",
+      }),
+    );
+    this.menuRoot = root;
+  }
+
+  private drawSpots() {
+    const matColor: Partial<Record<TownSpot["kind"], number>> = {
+      center: 0xe85d75,
+      mart: 0x3d8bfd,
+      house: 0xe0b15a,
+    };
+    for (let index = 0; index < this.spots.length; index++) {
+      const spot = this.spots[index];
+      const zone = this.add
+        .zone(spot.x + spot.w / 2, spot.y + spot.h / 2, spot.w, spot.h)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(6);
+      zone.setName(`town-spot-${spot.id}`);
+      zone.on("pointerdown", () => {
+        if (this.menu || this.partyOpen || this.leaving || this.switching) {
+          return;
+        }
+        this.openSpot(spot);
+      });
+      if (spot.kind === "npc") {
+        const sprite = this.add
+          .sprite(spot.x + spot.w / 2, spot.y + spot.h / 2, "cc_player", "misa-front")
+          .setDepth(4)
+          .setTint(index % 2 === 0 ? 0xb9d6ff : 0xc8f0c2);
+        this.add
+          .text(sprite.x, sprite.y - 24, spot.name, {
+            fontFamily: "emerald, monospace",
+            fontSize: "28px",
+            color: "#ffffff",
+            backgroundColor: "#1b2440dd",
+            padding: { x: 6, y: 2 },
+          })
+          .setOrigin(0.5, 1)
+          .setScale(0.5)
+          .setDepth(6);
+        continue;
+      }
+      const color = matColor[spot.kind];
+      if (color !== undefined) {
+        const mat = this.add.graphics().setDepth(3);
+        mat.fillStyle(color, 0.9);
+        mat.fillRect(spot.x + 4, spot.y + spot.h - 8, spot.w - 8, 6);
+      }
+      if (spot.kind !== "center") {
+        this.add
+          .text(spot.x + spot.w / 2, spot.y, spot.name, {
+            fontFamily: "emerald, monospace",
+            fontSize: "28px",
+            color: "#ffffff",
+            backgroundColor: "#1b2440dd",
+            padding: { x: 8, y: 3 },
+          })
+          .setOrigin(0.5, 1)
+          .setScale(0.5)
+          .setDepth(20);
+      }
+    }
+  }
+
   private releasePresence() {
     this.clearRemotes();
     this.presence?.disconnect();
     this.presence = null;
   }
+}
+
+function menuAccent(kind: TownSpot["kind"]): { border: number; title: string } {
+  if (kind === "mart") {
+    return { border: 0x6ec1ff, title: "#9fd0ff" };
+  }
+  if (kind === "center") {
+    return { border: 0xff8fa3, title: "#ffb3c2" };
+  }
+  return { border: 0xf6d36b, title: "#ffe08a" };
 }
 
 export function townEnabled(): boolean {
