@@ -4,9 +4,8 @@
  * catch-backend validates each event and makes every roll server-side.
  */
 import { loggedInUser } from "#app/account";
-import { globalScene } from "#app/global-scene";
-
 import { SESSION_ID_COOKIE_NAME } from "#app/constants";
+import { globalScene } from "#app/global-scene";
 import { getCookie } from "#utils/cookies";
 
 const API: string = import.meta.env.VITE_SERVER_URL ?? "";
@@ -100,7 +99,10 @@ export async function catchStartRun(mode: string): Promise<void> {
   }
 }
 
-export function catchReport(type: "catch" | "battle_won" | "wave_reached" | "run_won", data: Record<string, unknown> = {}): void {
+export function catchReport(
+  type: "catch" | "battle_won" | "wave_reached" | "run_won",
+  data: Record<string, unknown> = {},
+): void {
   if (!runId) {
     return;
   }
@@ -116,8 +118,7 @@ export function catchReport(type: "catch" | "battle_won" | "wave_reached" | "run
   }
 }
 
-const TIP =
-  "Catches and wins have a chance to drop real Collector Crypt cards when you play with a connected wallet.";
+const TIP = "Catches and wins have a chance to drop real Collector Crypt cards when you play with a connected wallet.";
 let tipShown = false;
 /** Once per session, after a win or catch, remind players without a linked wallet. */
 export function catchWalletTip(): void {
@@ -144,4 +145,74 @@ export function catchEnsureCardIcon(): void {
     tex.add("cc_card", tex.source.length - 1, 0, 0, img.width, img.height);
   };
   img.src = "./images/cc_card.png";
+}
+
+// ---------- Leaderboard progress. Local record of the best this account has reached; the server validates and clamps it.
+interface CatchProgress {
+  wave: number;
+  gyms: number[];
+  biomes: number[];
+}
+function progressKey(): string | null {
+  return loggedInUser?.username ? `cc-progress:${loggedInUser.username}` : null;
+}
+function loadProgress(k: string): CatchProgress {
+  try {
+    const p = JSON.parse(localStorage.getItem(k) ?? "");
+    return {
+      wave: Number(p.wave) || 0,
+      gyms: Array.isArray(p.gyms) ? p.gyms : [],
+      biomes: Array.isArray(p.biomes) ? p.biomes : [],
+    };
+  } catch {
+    return { wave: 0, gyms: [], biomes: [] };
+  }
+}
+/** Call after a won battle: best wave, distinct gym leaders beaten, distinct biomes visited. Reports only when something went up. */
+export function catchReportProgress(): void {
+  const k = progressKey();
+  if (!k) {
+    return;
+  }
+  try {
+    const p = loadProgress(k);
+    const before = JSON.stringify(p);
+    const battle = globalScene.currentBattle;
+    p.wave = Math.max(p.wave, battle.waveIndex);
+    const t = battle.trainer?.config;
+    if (t && t.title?.startsWith("gymLeader") && !p.gyms.includes(t.trainerType)) {
+      p.gyms.push(t.trainerType);
+    }
+    const biome = globalScene.arena?.biomeId;
+    if (biome != null && !p.biomes.includes(biome)) {
+      p.biomes.push(biome);
+    }
+    if (JSON.stringify(p) === before) {
+      return;
+    }
+    localStorage.setItem(k, JSON.stringify(p));
+    void post("/api/progress", { wave: p.wave, badges: p.gyms.length, biomes: p.biomes.length });
+  } catch {
+    // never block the game on a report
+  }
+}
+
+export interface LeaderboardData {
+  ok: boolean;
+  sort: "progress" | "cards";
+  total: number;
+  top: any[];
+  me: any | null;
+}
+/** Public board; sends the session token when logged in so the server can include your rank. */
+export async function catchLeaderboard(sort: "progress" | "cards"): Promise<LeaderboardData | null> {
+  const t = getCookie(SESSION_ID_COOKIE_NAME);
+  try {
+    const r = await fetch(`${API}/api/leaderboard/players?sort=${sort}`, {
+      headers: t ? { authorization: `Bearer ${t}` } : {},
+    });
+    return await r.json();
+  } catch {
+    return null;
+  }
 }
