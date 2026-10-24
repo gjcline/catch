@@ -5,14 +5,18 @@
  */
 import { loggedInUser } from "#app/account";
 import {
+  allTownSprites,
   type CharacterPickerState,
   characterPickerKey,
   DEFAULT_TOWN_SPRITE,
   idleFrame,
   loadTownSprite,
+  misaVariants,
   moveCharacterPicker,
+  moveMisaVariant,
   openCharacterPicker,
   playerAtlasKey,
+  previewCaption,
   resolveTownSprite,
   saveTownSprite,
   selectedTownCharacter,
@@ -129,7 +133,7 @@ export class TownScene extends Phaser.Scene {
     this.load.tilemapTiledJSON("cc_town", "town.json");
     this.load.image("cc_tiles", "tuxmon-sample-32px-extruded.png");
     this.load.atlas("cc_player", "atlas.png", "atlas.json");
-    for (const character of townCharacters) {
+    for (const character of allTownSprites()) {
       if (character.file === "atlas.png") {
         continue;
       }
@@ -622,7 +626,7 @@ export class TownScene extends Phaser.Scene {
 
   /** Four-direction walk cycles for every character sheet. Textures are loaded in preload. */
   private ensureCharacterAnims() {
-    for (const character of townCharacters) {
+    for (const character of allTownSprites()) {
       const atlas = playerAtlasKey(character.id);
       for (const facing of townFacings()) {
         const key = walkAnimKey(character.id, facing);
@@ -781,6 +785,10 @@ export class TownScene extends Phaser.Scene {
         this.onPickerStep(-1);
       } else if (pickerAction === "next") {
         this.onPickerStep(1);
+      } else if (pickerAction === "variant-prev") {
+        this.onVariantStep(-1);
+      } else if (pickerAction === "variant-next") {
+        this.onVariantStep(1);
       }
       return;
     }
@@ -804,7 +812,7 @@ export class TownScene extends Phaser.Scene {
 
   private nudgeMenu(dir: -1 | 1) {
     if (this.picker) {
-      this.onPickerStep(dir);
+      this.onVariantStep(dir);
       return;
     }
     if (!this.menu || this.leaving || this.switching || this.partyOpen) {
@@ -876,6 +884,14 @@ export class TownScene extends Phaser.Scene {
       return;
     }
     moveCharacterPicker(this.picker, dir);
+    this.renderPicker();
+  }
+
+  private onVariantStep(dir: -1 | 1) {
+    if (!this.picker || this.leaving || this.switching || this.partyOpen) {
+      return;
+    }
+    moveMisaVariant(this.picker, dir);
     this.renderPicker();
   }
 
@@ -1162,11 +1178,12 @@ export class TownScene extends Phaser.Scene {
     const scale = 1 / cam.zoom;
     const panelW = 560;
     const columns = 2;
-    const rowH = 50;
-    const gridTop = 236;
+    const rowH = 46;
+    const showColors = townCharacters[picker.index]?.id === "misa";
+    const gridTop = showColors ? 286 : 228;
     const rows = Math.ceil(townCharacters.length / columns);
     const chooseY = gridTop + rows * rowH + 6;
-    const panelH = chooseY + 86;
+    const panelH = chooseY + 100;
     const screenLeft = (width - panelW * scale) / 2;
     const screenTop = (height - panelH * scale) / 2;
     const originX = width / 2 + (screenLeft - width / 2) / cam.zoom;
@@ -1205,13 +1222,44 @@ export class TownScene extends Phaser.Scene {
     });
     root.add(
       this.add
-        .text(panelW / 2, 196, selected.name, {
+        .text(panelW / 2, 188, previewCaption(picker), {
           fontFamily: "emerald, monospace",
           fontSize: "32px",
           color: "#ffe08a",
         })
         .setOrigin(0.5, 0),
     );
+    if (showColors) {
+      const chipW = (panelW - 56) / misaVariants.length;
+      for (let index = 0; index < misaVariants.length; index++) {
+        const variant = misaVariants[index];
+        if (!variant) {
+          continue;
+        }
+        const x = 28 + index * chipW;
+        const chosen = index === picker.variant;
+        const chip = this.add
+          .rectangle(x + chipW / 2, 230, chipW - 6, 32, chosen ? 0x2f6b4a : 0x000000, chosen ? 1 : 0.2)
+          .setInteractive({ useHandCursor: true });
+        chip.on("pointerdown", () => {
+          if (!this.picker || this.leaving) {
+            return;
+          }
+          this.picker.variant = index;
+          this.renderPicker();
+        });
+        root.add(chip);
+        root.add(
+          this.add
+            .text(x + chipW / 2, 218, variant.name, {
+              fontFamily: "emerald, monospace",
+              fontSize: "20px",
+              color: chosen ? "#ffe08a" : "#ffffff",
+            })
+            .setOrigin(0.5, 0),
+        );
+      }
+    }
     const cellW = (panelW - 64) / columns;
     for (let index = 0; index < townCharacters.length; index++) {
       const character = townCharacters[index];
@@ -1235,6 +1283,7 @@ export class TownScene extends Phaser.Scene {
           return;
         }
         this.picker.index = index;
+        this.picker.variant = 0;
         this.renderPicker();
       });
       root.add(hit);
@@ -1261,11 +1310,17 @@ export class TownScene extends Phaser.Scene {
         .setOrigin(0.5, 0),
     );
     root.add(
-      this.add.text(28, panelH - 34, "Arrows or click.  Space confirms.  B or Esc closes.", {
-        fontFamily: "emerald, monospace",
-        fontSize: "22px",
-        color: "#c5cbe0",
-      }),
+      this.add.text(
+        28,
+        panelH - 58,
+        "Left and right choose a person. Up and down recolor Misa. Space confirms. B or Esc closes.",
+        {
+          fontFamily: "emerald, monospace",
+          fontSize: "20px",
+          color: "#c5cbe0",
+          wordWrap: { width: panelW - 56 },
+        },
+      ),
     );
     this.pickerRoot = root;
   }

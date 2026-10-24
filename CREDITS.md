@@ -779,4 +779,5 @@ Overworld maps (town and route1), tuxmon tileset and player sprite atlas, plus t
 [aaron5670/PokeMMO-Online-Realtime-Multiplayer-Game](https://github.com/aaron5670/PokeMMO-Online-Realtime-Multiplayer-Game), licensed WTFPL
 (see `catchcrypt/public/town/LICENSE-WTFPL.txt`). Tuxmon tileset by the Tuxemon project contributors as distributed in that repo.
 The walkable town stamps that town layout and adds districts around it; Route 1, the deep forest, and the grove are generated from the same tiles.
-The extra character sheets (`atlas-rose.png`, `atlas-sea.png`, `atlas-moss.png`, `atlas-gold.png`, `atlas-dusk.png`) are recolors of that player atlas. Skin tones and outlines are unchanged.
+The extra Misa sheets (`atlas-rose.png`, `atlas-sea.png`, `atlas-moss.png`, `atlas-gold.png`, `atlas-dusk.png`) are recolors of that player atlas. Skin tones and outlines are unchanged.
+Lark, Piper, Reed, Bram, Nico, and Holt (`atlas-lark.png`, `atlas-piper.png`, `atlas-reed.png`, `atlas-bram.png`, `atlas-nico.png`, `atlas-holt.png`) are original pixel art drawn for CatchCrypt. They are not Nintendo or Game Freak sprites. The generator is `catchcrypt/scripts/draw-town-characters.mjs`.

@@ -35,11 +35,24 @@ const FACING = new Set(["front", "back", "left", "right"]);
 const NAME_CHARS = /[^\p{L}\p{N} _.'-]/gu;
 
 /**
- * Keep this list identical to `townCharacters` in src/catch/town-characters.ts.
+ * Keep this list identical to `allTownSprites()` in src/catch/town-characters.ts.
  * Unknown values fall back to the default so an old or mistaken client still joins.
  */
 export const DEFAULT_SPRITE = "misa";
-export const SPRITE_IDS = ["misa", "misa-rose", "misa-sea", "misa-moss", "misa-gold", "misa-dusk"];
+export const SPRITE_IDS = [
+  "misa",
+  "misa-rose",
+  "misa-sea",
+  "misa-moss",
+  "misa-gold",
+  "misa-dusk",
+  "lark",
+  "piper",
+  "reed",
+  "bram",
+  "nico",
+  "holt",
+];
 const SPRITE_ALLOWLIST = new Set(SPRITE_IDS);
 
 export function sanitizeSprite(input) {

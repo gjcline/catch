@@ -28,7 +28,7 @@ Coordinates are pixel positions of the sprite center. Tiles are 32px. The server
 
 Facing is `front`, `back`, `left`, or `right` (the `misa-*` atlas frames).
 
-Sprite is a string id on this allowlist: `misa`, `misa-rose`, `misa-sea`, `misa-moss`, `misa-gold`, `misa-dusk`. Anything else, including a missing or non-string value, is stored as `misa`. The hello is still accepted. Older clients that always send `misa` keep working, and older clients that ignore the field still draw the default sheet. A later hello is how a player changes character: the same socket updates its sprite, and the area receives another spawn so other clients can redraw them.
+Sprite is a string id. `misa`, `misa-rose`, `misa-sea`, `misa-moss`, `misa-gold`, and `misa-dusk` are Misa and her color variants. `lark`, `piper`, `reed`, `bram`, `nico`, and `holt` are separate sheets in the same frame layout. Anything else, including a missing or non-string value, is stored as `misa`. The hello is still accepted. Older clients that always send `misa` keep working, and older clients that ignore the field still draw the default sheet. A later hello is how a player changes character: the same socket updates its sprite, and the area receives another spawn so other clients can redraw them.
 
 ## Join
 
