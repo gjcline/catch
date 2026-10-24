@@ -6,7 +6,10 @@
  * Beach and Cave are level 10, and the Grove beside town is open.
  * Biome areas (`biome-plains` and the rest) are built from the same tiles and
  * connect back to town. The town grows a gate for the biomes the run has reached.
+ * Room sizes come from `presence/area-tiles.json`.
  */
+
+import { CORE_AREA_TILES } from "#app/catch/overworld-areas";
 
 export type Dir = "north" | "south" | "east" | "west";
 export type CoreAreaId = "town" | "grove" | "route1" | "forest" | "beach" | "cave";
@@ -878,8 +881,8 @@ function buildScenic(opts: GeneratedAreaSpec): BuiltMap {
 
 function buildRoute(): BuiltMap {
   return buildScenic({
-    w: 56,
-    h: 80,
+    w: CORE_AREA_TILES.route1.w,
+    h: CORE_AREA_TILES.route1.h,
     mouths: [
       { dir: "south", at: 25, len: 6, label: "Town" },
       { dir: "north", at: 25, len: 6, label: "Deep Forest  Lv 8" },
@@ -920,8 +923,8 @@ function buildRoute(): BuiltMap {
 
 function buildForest(): BuiltMap {
   return buildScenic({
-    w: 64,
-    h: 88,
+    w: CORE_AREA_TILES.forest.w,
+    h: CORE_AREA_TILES.forest.h,
     mouths: [{ dir: "south", at: 29, len: 6, label: "Route 1" }],
     trails: [
       [
@@ -970,8 +973,8 @@ function buildForest(): BuiltMap {
 
 function buildGrove(): BuiltMap {
   return buildScenic({
-    w: 44,
-    h: 38,
+    w: CORE_AREA_TILES.grove.w,
+    h: CORE_AREA_TILES.grove.h,
     mouths: [{ dir: "east", at: 16, len: 6, label: "Town" }],
     trails: [
       [
@@ -1001,8 +1004,7 @@ function buildGrove(): BuiltMap {
 }
 
 function buildBeach(): BuiltMap {
-  const w = 42;
-  const h = 32;
+  const { w, h } = CORE_AREA_TILES.beach;
   const built = buildScenic({
     w,
     h,
@@ -1034,8 +1036,8 @@ function buildBeach(): BuiltMap {
 
 function buildCave(): BuiltMap {
   return buildScenic({
-    w: 38,
-    h: 30,
+    w: CORE_AREA_TILES.cave.w,
+    h: CORE_AREA_TILES.cave.h,
     ground: T.sand,
     mouths: [{ dir: "west", at: 12, len: 6, label: "Town" }],
     trails: [
@@ -1070,8 +1072,8 @@ const OX = 18;
 const OY = 16;
 const SRC_W = 40;
 const SRC_H = 40;
-const TOWN_W = 76;
-const TOWN_H = 72;
+const TOWN_W = CORE_AREA_TILES.town.w;
+const TOWN_H = CORE_AREA_TILES.town.h;
 
 const COTTAGE: TileRect = { x: 4, y: 30, w: 8, h: 6 };
 

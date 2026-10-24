@@ -7,6 +7,10 @@
  * REFUSE (30) is CatchCrypt-only. See presence/PROTOCOL.md.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 /** @typedef {"front" | "back" | "left" | "right"} Facing */
 
 export const Op = {
@@ -19,17 +23,25 @@ export const Op = {
   REFUSE: 30,
 };
 
-/** Tile counts from `src/catch/town-maps.ts` (32px tiles). */
-export const AREA_TILES = {
-  town: { w: 76, h: 72 },
-  grove: { w: 44, h: 38 },
-  route1: { w: 56, h: 80 },
-  forest: { w: 64, h: 88 },
-  beach: { w: 42, h: 32 },
-  cave: { w: 38, h: 30 },
-};
+/**
+ * Same catalog the town map builders import (`src/catch/overworld-areas.ts`).
+ * Kept inside this package so a presence-only deploy still has the bounds.
+ */
+const areaCatalog = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../area-tiles.json"), "utf8"),
+);
 
-export const TILE = 32;
+export const TILE = areaCatalog.tile;
+
+/** @type {Record<string, { w: number, h: number }>} */
+export const AREA_TILES = { ...areaCatalog.core };
+for (const [slug, layout] of Object.entries(areaCatalog.biomes)) {
+  const size = areaCatalog.layouts[layout];
+  if (!size) {
+    throw new Error(`Unknown overworld layout ${layout}`);
+  }
+  AREA_TILES[`${areaCatalog.biomePrefix}${slug}`] = size;
+}
 
 const FACING = new Set(["front", "back", "left", "right"]);
 const NAME_CHARS = /[^\p{L}\p{N} _.'-]/gu;

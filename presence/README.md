@@ -48,4 +48,4 @@ Create the service with **root directory `presence`** so Nixpacks uses this `pac
 
 Do not point this service at the game's Vite start command. The game stays on Vercel and only dials the presence URL.
 
-Redeploy this service when the sprite allowlist in `src/protocol.js` changes. Until then every hello is stored as `misa`, so other players only see the default sheet. The town itself still walks if this process is down.
+Redeploy this service when `area-tiles.json` or the sprite allowlist in `src/protocol.js` changes. Until a sprite change is deployed, every unknown hello is stored as `misa`, so other players only see the default sheet. The town itself still walks if this process is down.
