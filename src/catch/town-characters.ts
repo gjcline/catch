@@ -1,7 +1,7 @@
 /*
  * CatchCrypt town character choices. AGPL-3.0.
  * Misa is the original sheet. Rose, Sea, Moss, Gold, and Dusk are recolors of her.
- * Lark, Piper, Reed, Bram, Nico, and Holt are original pixel art in the same frame layout.
+ * Lark, Piper, Reed, Bram, Nico, and Holt are Misa's sheet with new hair, clothes, and skin.
  */
 import type { Facing } from "#app/catch/town-presence";
 
