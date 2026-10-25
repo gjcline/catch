@@ -3,7 +3,9 @@
  * Map, tileset and player sprite: aaron5670/PokeMMO-Online-Realtime-Multiplayer-Game (WTFPL), see CREDITS.md.
  * Movement is a small grid-free walker with tile collision, modeled on that repo's Player.js.
  */
+
 import { loggedInUser } from "#app/account";
+import { pcStep } from "#app/catch/pc-menu";
 import {
   biomeAreaBg,
   biomeAreaName,
@@ -128,6 +130,7 @@ export class TownScene extends Phaser.Scene {
   private switching = false;
   private partyOpen = false;
   private menu: TownMenu | null = null;
+  private pcBusy = false;
   private menuRoot: Phaser.GameObjects.Container | undefined;
   private picker: CharacterPickerState | null = null;
   private pickerRoot: Phaser.GameObjects.Container | undefined;
@@ -1119,6 +1122,26 @@ export class TownScene extends Phaser.Scene {
     }
     const action = townKeyAction(key, this.menu !== null);
     if (action === "close") {
+      if (this.menu && this.menu.options.some(o => o.id.startsWith("pc:"))) {
+        if (!this.pcBusy) {
+          const back = this.menu.options.some(o => o.id === "pc:exit") ? "pc:exit" : "pc:root";
+          const menu = this.menu;
+          this.pcBusy = true;
+          pcStep(menu, back)
+            .then(stay => {
+              if (this.menu === menu) {
+                if (!stay) {
+                  this.menu = openTownMenu(menu.spot, this.wallet.money);
+                }
+                this.renderMenu();
+              }
+            })
+            .finally(() => {
+              this.pcBusy = false;
+            });
+        }
+        return;
+      }
       this.closeMenu();
       return;
     }
@@ -1286,9 +1309,39 @@ export class TownScene extends Phaser.Scene {
     if (!this.menu) {
       return;
     }
+    if (this.pcBusy) {
+      return;
+    }
     const result = confirmTownMenu(this.menu);
     if (result.type === "close") {
       this.closeMenu();
+      return;
+    }
+    if (result.type === "pc") {
+      const menu = this.menu;
+      this.pcBusy = true;
+      pcStep(menu, result.id)
+        .then(stay => {
+          if (this.menu !== menu) {
+            return;
+          }
+          if (!stay) {
+            const spot = menu.spot;
+            this.menu = openTownMenu(spot, this.wallet.money);
+          }
+          (window as any).__ccTownMenuName = this.menu?.title;
+          this.renderMenu();
+        })
+        .catch(err => {
+          console.error("CatchCrypt: PC failed", err);
+          if (this.menu === menu) {
+            menu.message = "The PC is not responding.";
+            this.renderMenu();
+          }
+        })
+        .finally(() => {
+          this.pcBusy = false;
+        });
       return;
     }
     if (result.type === "heal") {

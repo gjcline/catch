@@ -1,4 +1,6 @@
 import { catchReport } from "#app/catch/catch-client";
+import { pcIsFull } from "#app/catch/pc-state";
+import { sendCaughtToPc } from "#app/catch/pc-storage";
 import { PLAYER_PARTY_MAX_SIZE } from "#app/constants";
 import { audioManager } from "#app/global-audio-manager";
 import { timedEventManager } from "#app/global-event-manager";
@@ -269,7 +271,14 @@ export class AttemptCapturePhase extends PokemonPhase {
     }
 
     pokemonInfoContainer.show(pokemon, true);
-    catchReport("catch", { speciesId: pokemon.species.speciesId, shiny: pokemon.isShiny(), legendary: pokemon.species.legendary, subLegendary: pokemon.species.subLegendary, mythical: pokemon.species.mythical, boss: pokemon.isBoss() });
+    catchReport("catch", {
+      speciesId: pokemon.species.speciesId,
+      shiny: pokemon.isShiny(),
+      legendary: pokemon.species.legendary,
+      subLegendary: pokemon.species.subLegendary,
+      mythical: pokemon.species.mythical,
+      boss: pokemon.isBoss(),
+    });
 
     gameData.updateSpeciesDexIvs(pokemon.species.getRootSpeciesId(true), pokemon.ivs);
 
@@ -319,8 +328,48 @@ export class AttemptCapturePhase extends PokemonPhase {
             return;
           }
           if (globalScene.getPlayerParty().length === PLAYER_PARTY_MAX_SIZE) {
+            const sendToPc = () => {
+              const boxed = globalScene.addPlayerPokemon(
+                pokemon.species,
+                pokemon.level,
+                pokemon.abilityIndex,
+                pokemon.formIndex,
+                pokemon.gender,
+                pokemon.shiny,
+                pokemon.variant,
+                pokemon.ivs,
+                pokemon.nature,
+                pokemon,
+              );
+              boxed.pokeball = this.pokeballType;
+              const result = sendCaughtToPc(pokemon, boxed);
+              boxed.destroy();
+              ui.setMode(UiMode.MESSAGE).then(() => {
+                ui.showText(
+                  result.message,
+                  null,
+                  () => {
+                    removePokemon();
+                    end();
+                  },
+                  null,
+                  true,
+                );
+              });
+            };
             const addToPartyMenuConfig: OptionSelectModeConfig = {
               options: [
+                ...(pcIsFull()
+                  ? []
+                  : [
+                      {
+                        label: "Send to PC",
+                        handler: () => {
+                          sendToPc();
+                          return true;
+                        },
+                      },
+                    ]),
                 {
                   label: i18next.t("partyUiHandler:summary"),
                   handler: () => {

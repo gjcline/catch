@@ -47,6 +47,7 @@ import { ChallengeData } from "#system/challenge-data";
 import { EggData } from "#system/egg-data";
 import { GameStats } from "#system/game-stats";
 import { ModifierData as PersistentModifierData } from "#system/modifier-data";
+import { restorePc, serializePc } from "#app/catch/pc-storage";
 import { PokemonData } from "#system/pokemon-data";
 import { RibbonData } from "#system/ribbon-data";
 import { TrainerData } from "#system/trainer-data";
@@ -782,6 +783,7 @@ export class GameData {
       mysteryEncounterType: globalScene.currentBattle.mysteryEncounter?.encounterType ?? -1,
       mysteryEncounterSaveData: globalScene.mysteryEncounterSaveData,
       playerFaints: globalScene.arena.playerFaints,
+      pcBox: serializePc(),
     } as SessionSaveData;
   }
 
@@ -908,6 +910,7 @@ export class GameData {
       loadPokemonAssets.push(pokemon.loadAssets(false));
       party.push(pokemon);
     }
+    restorePc(fromSession.pcBox);
 
     Object.keys(globalScene.pokeballCounts).forEach((key: string) => {
       globalScene.pokeballCounts[key] = fromSession.pokeballCounts[key] || 0;

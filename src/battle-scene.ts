@@ -1,4 +1,5 @@
 import { applyAbAttrs } from "#abilities/apply-ab-attrs";
+import { clearPcState } from "#app/catch/pc-state";
 import { Animation } from "#app/animations";
 import { Battle } from "#app/battle";
 import {
@@ -1129,6 +1130,7 @@ export class BattleScene extends SceneBase {
 
     this.modifiers = [];
     this.enemyModifiers = [];
+    clearPcState();
     this.modifierBar.removeAll(true);
     this.enemyModifierBar.removeAll(true);
 

@@ -42,6 +42,8 @@ export interface SystemSaveData {
 }
 
 export interface SessionSaveData {
+  /** CatchCrypt PC box. Optional: older saves have no box. */
+  pcBox?: import("#app/catch/pc-storage").PcSaveData;
   seed: string;
   playTime: number;
   gameMode: GameModes;

@@ -162,11 +162,12 @@ export function openTownMenu(spot: TownSpot, money: number | null): TownMenu {
       title: spot.name,
       options: [
         { id: "heal", label: "Heal" },
+        { id: "pc", label: "Use the PC" },
         { id: "close", label: "Goodbye" },
       ],
       index: 0,
       line: 0,
-      message: "We can restore your party's HP and PP.",
+      message: "We can restore your party's HP and PP. The PC stores extra Pokémon.",
     };
   }
   if (spot.kind === "mart") {
@@ -200,6 +201,7 @@ export type TownMenuResult =
   | { type: "stay" }
   | { type: "close" }
   | { type: "heal" }
+  | { type: "pc"; id: string }
   | { type: "buy"; itemId: MartItemId };
 
 export function moveTownMenu(menu: TownMenu, dir: -1 | 1): void {
@@ -227,6 +229,9 @@ export function confirmTownMenu(menu: TownMenu): TownMenuResult {
   }
   if (id === "heal") {
     return { type: "heal" };
+  }
+  if (id === "pc" || id.startsWith("pc:")) {
+    return { type: "pc", id };
   }
   if (id === "pokeball" || id === "potion") {
     return { type: "buy", itemId: id };
