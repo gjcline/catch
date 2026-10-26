@@ -1,4 +1,5 @@
 import { updateUserInfo } from "#app/account";
+import { hideBootLoading } from "#app/catch/boot-loading";
 import { audioManager } from "#app/global-audio-manager";
 import { globalScene } from "#app/global-scene";
 import { settings } from "#app/global-settings-manager";
@@ -57,6 +58,7 @@ export class LoginPhase extends Phase {
       return;
     }
     ui.setMode(UiMode.MESSAGE);
+    hideBootLoading();
     ui.showText(t("menu:failedToLoadSaveData"));
   }
 
@@ -105,6 +107,7 @@ export class LoginPhase extends Phase {
 
   private showLoginRegister(): void {
     const { ui } = globalScene;
+    hideBootLoading();
 
     const goToLoginButton = () => {
       this.goToLogin();
@@ -136,6 +139,7 @@ export class LoginPhase extends Phase {
 
   public goToLogin(): void {
     const { gameData, ui, phaseManager } = globalScene;
+    hideBootLoading();
 
     const backButton = () => {
       phaseManager.unshiftNew("LoginPhase", false);
@@ -157,6 +161,7 @@ export class LoginPhase extends Phase {
 
   public goToRegister(): void {
     const { phaseManager, ui } = globalScene;
+    hideBootLoading();
 
     const backButton = () => {
       phaseManager.unshiftNew("LoginPhase", false);

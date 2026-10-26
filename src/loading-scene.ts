@@ -1,3 +1,4 @@
+import { showBootLoading } from "#app/catch/boot-loading";
 import { timedEventManager } from "#app/global-event-manager";
 import { globalScene } from "#app/global-scene";
 import { activeOverrides } from "#app/overrides";
@@ -514,6 +515,9 @@ export class LoadingScene extends SceneBase {
         }
       })
       .on(this.LOAD_EVENTS.COMPLETE, () => {
+        // The bar is about to go away. Account, system save, and session fetches
+        // still sit on the plains arena, so keep a centered indicator up.
+        showBootLoading();
         for (const g of loadingGraphics) {
           g.destroy();
         }

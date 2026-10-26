@@ -1,3 +1,4 @@
+import { hideBootLoading } from "#app/catch/boot-loading";
 import { globalScene } from "#app/global-scene";
 import { settings } from "#app/global-settings-manager";
 import { Phase } from "#app/phase";
@@ -11,6 +12,7 @@ export class SelectGenderPhase extends Phase {
 
   public override start(): void {
     super.start();
+    hideBootLoading();
 
     const { gameData, ui } = globalScene;
 

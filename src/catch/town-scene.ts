@@ -5,6 +5,7 @@
  */
 
 import { loggedInUser } from "#app/account";
+import { hideBootLoading, showBootLoading } from "#app/catch/boot-loading";
 import { pcStep } from "#app/catch/pc-menu";
 import {
   biomeAreaBg,
@@ -185,6 +186,7 @@ export class TownScene extends Phaser.Scene {
     } catch (err) {
       // A throw here used to leave the battle paused and hidden: solid black, no buttons.
       console.error("CatchCrypt: town failed to start", err);
+      hideBootLoading();
       this.leaving = true;
       this.releasePresence();
       this.time.delayedCall(0, () => {
@@ -248,6 +250,7 @@ export class TownScene extends Phaser.Scene {
     this.showBanner();
     (window as any).__ccArea = this.area;
     this.attachPresence();
+    hideBootLoading();
   }
 
   /** Keyboard still works on a phone with a keyboard attached. A missing plugin must not blank the town. */
@@ -1803,6 +1806,9 @@ export function enterTown(battle: Phaser.Scene, resume: () => void): void {
   releaseKeys();
   battle.scene.pause();
   battle.scene.setVisible(false);
+  // Hiding the battle freezes its last frame (the sky and grass arena) until the
+  // town finishes loading its map and character sheets.
+  showBootLoading();
   (window as any).__ccScenes = () =>
     mgr.getScenes(false).map(sc => `${sc.scene.key}:${sc.scene.isActive()}:${sc.scene.isVisible()}`);
   (window as any).__ccInTown = true;
@@ -1827,6 +1833,7 @@ export function enterTown(battle: Phaser.Scene, resume: () => void): void {
     const stuck = !sc || status <= Phaser.Scenes.INIT || status === Phaser.Scenes.CREATING;
     if (resumeCb && stuck) {
       console.warn("CatchCrypt: town did not start, continuing to the battle");
+      hideBootLoading();
       const cb = resumeCb;
       resumeCb = null;
       if (sc) {
