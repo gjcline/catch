@@ -4,7 +4,7 @@
  */
 import { loggedInUser } from "#app/account";
 import type { CardOffer } from "#app/catch/catch-client";
-import { catchAcceptOffer } from "#app/catch/catch-client";
+import { catchAcceptOffer, catchDeclineOffer } from "#app/catch/catch-client";
 
 export const cardDropCss = `
 #cc-drop{position:fixed;inset:0;z-index:9998;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));background:radial-gradient(circle,#1b2440 0%,#05060c 80%);font-family:emerald,monospace;color:#fff;overflow:auto;text-align:center;touch-action:manipulation;-webkit-overflow-scrolling:touch}
@@ -121,12 +121,12 @@ export function showCardDrop(offer: CardOffer): Promise<string | null> {
       }
       confirmEl = document.createElement("div");
       confirmEl.className = "confirm";
-      confirmEl.innerHTML = `<div><p>Are you sure? This real card will be lost.</p>
+      confirmEl.innerHTML = `<div><p>Skip this card? This real card will be lost.</p>
         <button id="cc-drop-yes" style="background:#555;min-height:48px">Skip card</button>
         <button id="cc-drop-no" style="background:#e3342f;min-height:48px">Keep card</button></div>`;
       d.appendChild(confirmEl);
       (confirmEl.querySelector("#cc-drop-yes") as HTMLButtonElement).onclick = () => {
-        offer.status = "skipped";
+        catchDeclineOffer(offer);
         finish(null);
       };
       (confirmEl.querySelector("#cc-drop-no") as HTMLButtonElement).onclick = () => {

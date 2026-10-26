@@ -3,6 +3,7 @@
  * The wallet signs a server-issued message; the backend verifies and links it.
  */
 import { SESSION_ID_COOKIE_NAME } from "#app/constants";
+import { loggedInUser } from "#app/account";
 import { getCookie } from "#utils/cookies";
 
 const API: string = import.meta.env.VITE_SERVER_URL ?? "";
@@ -75,6 +76,10 @@ export async function connectWallet(): Promise<string> {
         ? "That wallet is linked to another account."
         : "Wallet link failed.",
     );
+  }
+  // Keep the in-memory account in sync so card offers show without a reload.
+  if (loggedInUser) {
+    (loggedInUser as any).wallet = wallet;
   }
   return wallet;
 }

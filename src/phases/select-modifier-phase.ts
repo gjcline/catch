@@ -1,4 +1,4 @@
-import { catchAcceptOffer, catchEnsureCardIcon, catchOfferFor } from "#app/catch/catch-client";
+import { catchAcceptOffer, catchEnsureCardIcon, catchHoldReports, catchOfferFor } from "#app/catch/catch-client";
 import { CardOfferModifierType } from "#app/catch/card-offer";
 import { audioManager } from "#app/global-audio-manager";
 import { globalScene } from "#app/global-scene";
@@ -76,13 +76,15 @@ export class SelectModifierPhase extends BattlePhase {
     if (!this.rerollCount && !this.isCopy && !this.ccOfferChecked) {
       this.ccOfferChecked = true;
       globalScene.ui.setMode(UiMode.MESSAGE);
+      const release = catchHoldReports();
       void catchOfferFor(globalScene.currentBattle.waveIndex).then(async offer => {
         if (!offer) {
+          release();
           this.start();
           return;
         }
         const { showCardDrop } = await import("#app/catch/card-drop");
-        const m = await showCardDrop(offer);
+        const m = await showCardDrop(offer).finally(release);
         if (m) {
           globalScene.ui.showText(m, null, () => super.end(), null, true);
         } else {
