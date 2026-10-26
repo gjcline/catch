@@ -1,6 +1,7 @@
-import { catchStartRun } from "#app/catch/catch-client";
 import { pokerogueApi } from "#api/api";
 import { loggedInUser } from "#app/account";
+import { hideBootLoading, showBootLoading } from "#app/catch/boot-loading";
+import { catchStartRun } from "#app/catch/catch-client";
 import { GameMode, getGameMode } from "#app/game-mode";
 import { audioManager } from "#app/global-audio-manager";
 import { timedEventManager } from "#app/global-event-manager";
@@ -36,6 +37,10 @@ export class TitlePhase extends Phase {
 
   async start(): Promise<void> {
     super.start();
+
+    // Session fetch and biome assets run before the menu exists. Keep the
+    // indicator from the asset bar, or bring it back after a form or tutorial.
+    showBootLoading();
 
     globalScene.ui.clearText();
     globalScene.ui.fadeIn(250);
@@ -191,6 +196,7 @@ export class TitlePhase extends Phase {
     );
     const config: OptionSelectModeConfig = { options, blockCancelButton: true };
     await ui.setMode(UiMode.TITLE, config);
+    hideBootLoading();
   }
 
   // TODO: Make callers actually wait for the save slot to load

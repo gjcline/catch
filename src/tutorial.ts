@@ -1,3 +1,4 @@
+import { hideBootLoading } from "#app/catch/boot-loading";
 import { globalScene } from "#app/global-scene";
 import { settings } from "#app/global-settings-manager";
 import { activeOverrides } from "#app/overrides";
@@ -30,6 +31,7 @@ function showTutorialDialogue(key: string, callback: () => void): void {
 const tutorialHandlers = {
   [Tutorial.INTRO]: () => {
     return new Promise<void>(resolve => {
+      hideBootLoading();
       globalScene.ui.showText(i18next.t("tutorial:intro"), null, () => resolve(), null, true);
     });
   },
