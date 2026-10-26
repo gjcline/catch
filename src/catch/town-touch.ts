@@ -12,6 +12,7 @@ export const TOWN_TOUCH_LABELS = {
   battle: "Battle",
   party: "Pokémon",
   character: "Character",
+  menu: "Menu",
   action: "A",
   back: "B",
   rotate: "Turn sideways for a wider view of the town.",
@@ -78,6 +79,7 @@ export interface TownTouchHandlers {
   onBattle: () => void;
   onParty: () => void;
   onCharacter: () => void;
+  onGameMenu: () => void;
   onMenuPick: (index: number) => void;
   onCharacterPick: (index: number) => void;
   onVariantPick: (index: number) => void;
@@ -165,6 +167,7 @@ export class TownTouchUi {
       button(doc, TOWN_TOUCH_LABELS.battle, "battle", () => handlers.onBattle()),
       button(doc, TOWN_TOUCH_LABELS.party, "party", () => handlers.onParty()),
       button(doc, TOWN_TOUCH_LABELS.character, "character", () => handlers.onCharacter()),
+      button(doc, TOWN_TOUCH_LABELS.menu, "menu", () => handlers.onGameMenu()),
     );
 
     const rotate = doc.createElement("div");
