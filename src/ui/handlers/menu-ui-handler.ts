@@ -51,9 +51,6 @@ enum MenuOptions {
   LOG_OUT,
 }
 
-let wikiUrl = import.meta.env.VITE_WIKI_URL;
-const { VITE_DISCORD_URL, VITE_GITHUB_URL, VITE_REDDIT_URL, VITE_DONATE_URL } = import.meta.env;
-
 export class MenuUiHandler extends OptionSelectUiHandler {
   private readonly textPadding = 8;
 
@@ -93,11 +90,6 @@ export class MenuUiHandler extends OptionSelectUiHandler {
     super.setup();
 
     const { ui } = globalScene;
-    // wiki url directs based on languges available on wiki
-    const lang = (i18next.resolvedLanguage ?? "en").slice(0, 2);
-    if (["de", "fr", "ko", "zh"].includes(lang)) {
-      wikiUrl = `https://wiki.pokerogue.net/${lang}:start`;
-    }
 
     this.bgmBar = new BgmBar();
     this.bgmBar.setup();
@@ -461,38 +453,6 @@ export class MenuUiHandler extends OptionSelectUiHandler {
         label: "Leaderboard",
         handler: () => {
           void import("#app/catch/leaderboard-ui").then(m => m.showLeaderboard());
-          return true;
-        },
-        keepOpen: true,
-      },
-      {
-        label: "Wiki",
-        handler: () => {
-          window.open(wikiUrl, "_blank")?.focus();
-          return true;
-        },
-        keepOpen: true,
-      },
-      {
-        label: "GitHub",
-        handler: () => {
-          window.open(VITE_GITHUB_URL, "_blank")?.focus();
-          return true;
-        },
-        keepOpen: true,
-      },
-      {
-        label: "Reddit",
-        handler: () => {
-          window.open(VITE_REDDIT_URL, "_blank")?.focus();
-          return true;
-        },
-        keepOpen: true,
-      },
-      {
-        label: i18next.t("menuUiHandler:donate"),
-        handler: () => {
-          window.open(VITE_DONATE_URL, "_blank")?.focus();
           return true;
         },
         keepOpen: true,
