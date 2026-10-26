@@ -40,17 +40,60 @@ async function get(path: string): Promise<any> {
   }
 }
 
-/** The server-made offer for this wave, if any. Waits briefly for the in-flight win/catch report. */
+const OFFER_WAIT_MS = 12_000;
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Reports that would move the run to a later wave are held while a card offer is being
+ * looked up or shown, so the server never lapses an offer the player has not answered.
+ */
+let gate: Promise<void> | null = null;
+export function catchHoldReports(): () => void {
+  let release!: () => void;
+  const g = new Promise<void>(r => (release = r));
+  gate = g;
+  return () => {
+    release();
+    if (gate === g) {
+      gate = null;
+    }
+  };
+}
+
+/**
+ * The server-made offer for this wave, if any. The server decides eligibility from the
+ * account's linked wallet, so this does not gate on the client copy of the wallet.
+ * Waits for the in-flight win/catch report, then asks the server directly if it was late.
+ */
 export async function catchOfferFor(wave: number): Promise<CardOffer | null> {
-  if (!runId || !loggedInUser?.wallet) {
+  if (!runId) {
     return null;
   }
   const p = pending.get(wave);
   if (p) {
-    await Promise.race([p, new Promise(r => setTimeout(r, 2500))]);
+    await Promise.race([p, sleep(OFFER_WAIT_MS)]);
   }
-  const o = offers.get(wave);
+  let o = offers.get(wave);
+  if (!o) {
+    for (let i = 0; i < 3 && !o; i++) {
+      const res = await get(`/api/runs/${runId}/offer?wave=${wave}`);
+      if (res?.offer) {
+        o = { ...res.offer, wave } as CardOffer;
+        offers.set(wave, o);
+      } else if (res?.ok && !p) {
+        break; // server answered: no offer, and nothing in flight
+      } else if (i < 2) {
+        await sleep(1500);
+      }
+    }
+  }
   return o && o.status === "offered" ? o : null;
+}
+
+/** Tell the server the player skipped this card. Fire-and-forget. */
+export function catchDeclineOffer(offer: CardOffer): void {
+  offer.status = "skipped";
+  void post(`/api/offers/${offer.id}/decline`, {});
 }
 
 /** Accept the offer. Returns the server's message, or an error text. */
@@ -107,7 +150,8 @@ export function catchReport(
     return;
   }
   const wave = globalScene.currentBattle?.waveIndex ?? 0;
-  const p = post(`/api/runs/${runId}/events`, { type, wave, data }).then(res => {
+  const held = gate;
+  const p = (held ? held.then(() => post(`/api/runs/${runId}/events`, { type, wave, data })) : post(`/api/runs/${runId}/events`, { type, wave, data })).then(res => {
     if (res?.offer) {
       offers.set(wave, res.offer);
     }
