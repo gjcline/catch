@@ -6,6 +6,14 @@
 
 import { loggedInUser } from "#app/account";
 import { hideBootLoading, showBootLoading } from "#app/catch/boot-loading";
+import {
+  domOverlayOpen,
+  GAME_MENU_LABELS,
+  isGameMenu,
+  openGameMenu,
+  saveGameNow,
+  showToast,
+} from "#app/catch/game-menu";
 import { pcStep } from "#app/catch/pc-menu";
 import {
   biomeAreaBg,
@@ -130,6 +138,9 @@ export class TownScene extends Phaser.Scene {
   private leaving = false;
   private switching = false;
   private partyOpen = false;
+  /** Town input waits until this time after a DOM overlay closes. */
+  private overlayUntil = 0;
+  private gameMenuBusy = false;
   private menu: TownMenu | null = null;
   private pcBusy = false;
   private menuRoot: Phaser.GameObjects.Container | undefined;
@@ -265,6 +276,7 @@ export class TownScene extends Phaser.Scene {
     this.keys = { up: k.UP, down: k.DOWN, left: k.LEFT, right: k.RIGHT, w: k.W, a: k.A, s: k.S, d: k.D };
     kb.on("keydown-P", () => this.openParty());
     kb.on("keydown-C", () => this.openPicker());
+    kb.on("keydown-M", () => this.openGameMenu());
     kb.on("keydown-B", () => this.onTownKey("b"));
     kb.on("keydown-ESC", () => this.onTownKey("esc"));
     kb.on("keydown-SPACE", () => this.onTownKey("space"));
@@ -330,12 +342,31 @@ export class TownScene extends Phaser.Scene {
       .setName("character-button");
     cbtn.setScale(1 / cam.zoom).setPosition(pbtn.x - pbtn.displayWidth - 6 / cam.zoom, btn.y);
     cbtn.on("pointerdown", () => this.openPicker());
+    const mbtn = this.add
+      .text(0, 0, GAME_MENU_LABELS.button, {
+        fontFamily: "emerald, monospace",
+        fontSize: "48px",
+        color: "#ffffff",
+        backgroundColor: "#6b4a8f",
+        padding: { x: 24, y: 12 },
+      })
+      .setOrigin(1, 1)
+      .setScrollFactor(0)
+      .setDepth(100)
+      .setInteractive({ useHandCursor: true })
+      .setName("menu-button");
+    mbtn.setScale(1 / cam.zoom).setPosition(cbtn.x - cbtn.displayWidth - 6 / cam.zoom, btn.y);
+    mbtn.on("pointerdown", () => this.openGameMenu());
+    const hintX = width / 2 - (width / 2 - 20) / cam.zoom;
+    // Wrap the hint so it never runs under the HUD buttons on the right.
+    const hintWrap = Math.max(200, (mbtn.x - mbtn.displayWidth - 12 / cam.zoom - hintX) * cam.zoom - 32);
     this.add
       .text(
-        width / 2 - (width / 2 - 20) / cam.zoom,
+        hintX,
         height / 2 + (height / 2 - 20) / cam.zoom,
-        "Arrows or WASD to walk.  Space or Z at a door.  P for your Pokémon.  C for your character.  Battle, B or Esc for the next wave.",
+        "WASD/Arrows walk.  Z at a door.  P Pokémon.  C Character.  M Menu.  B or Esc to battle.",
         {
+          wordWrap: { width: hintWrap },
           fontFamily: "emerald, monospace",
           fontSize: "36px",
           color: "#ffffff",
@@ -362,6 +393,7 @@ export class TownScene extends Phaser.Scene {
       onBattle: () => this.leave("button"),
       onParty: () => this.openParty(),
       onCharacter: () => this.openPicker(),
+      onGameMenu: () => this.openGameMenu(),
       onMenuPick: index => this.onTouchPick(index),
       onCharacterPick: index => this.onTouchCharacter(index),
       onVariantPick: index => this.onTouchVariant(index),
@@ -608,6 +640,17 @@ export class TownScene extends Phaser.Scene {
   }
 
   update(_t: number, dtMs: number) {
+    if (domOverlayOpen()) {
+      // Keep keys from walking or leaving town while the leaderboard or card list is up,
+      // and for a beat after it closes so its ESC cannot also leave town.
+      this.overlayUntil = this.time.now + 400;
+      this.touchDir = null;
+      this.player?.anims.stop();
+      return;
+    }
+    if (this.time.now < this.overlayUntil) {
+      return;
+    }
     this.repeatPad();
     if (this.worldPaused()) {
       return;
@@ -1103,7 +1146,7 @@ export class TownScene extends Phaser.Scene {
   }
 
   private onTownKey(key: string) {
-    if (this.leaving || this.switching || this.partyOpen) {
+    if (this.leaving || this.switching || this.partyOpen || this.overlayBlocking()) {
       return;
     }
     if (this.picker) {
@@ -1161,7 +1204,14 @@ export class TownScene extends Phaser.Scene {
     }
   }
 
+  private overlayBlocking(): boolean {
+    return domOverlayOpen() || this.time.now < this.overlayUntil;
+  }
+
   private nudgeMenu(dir: -1 | 1) {
+    if (this.overlayBlocking()) {
+      return;
+    }
     if (this.picker) {
       this.onVariantStep(dir);
       return;
@@ -1315,6 +1365,10 @@ export class TownScene extends Phaser.Scene {
     if (this.pcBusy) {
       return;
     }
+    if (isGameMenu(this.menu)) {
+      this.confirmGameMenu();
+      return;
+    }
     const result = confirmTownMenu(this.menu);
     if (result.type === "close") {
       this.closeMenu();
@@ -1358,6 +1412,161 @@ export class TownScene extends Phaser.Scene {
       return;
     }
     this.renderMenu();
+  }
+
+  /** Menu button, M key, or the touch Menu button. Same panel as the town counters. */
+  openGameMenu() {
+    if (this.leaving || this.switching || this.partyOpen || this.menu || this.picker || this.overlayBlocking()) {
+      return;
+    }
+    this.menu = openGameMenu();
+    this.player.anims.stop();
+    this.player.setFrame(idleFrame(this.dir));
+    this.input.keyboard?.resetKeys();
+    this.touchDir = null;
+    (window as any).__ccTownMenu = "game";
+    (window as any).__ccTownMenuName = this.menu.title;
+    this.renderMenu();
+  }
+
+  private confirmGameMenu() {
+    const menu = this.menu;
+    if (!menu || this.gameMenuBusy) {
+      return;
+    }
+    const id = menu.options[menu.index]?.id ?? "gm:close";
+    if (id === "gm:close") {
+      this.closeMenu();
+      return;
+    }
+    if (id === "gm:save") {
+      this.gameMenuBusy = true;
+      menu.message = GAME_MENU_LABELS.saving;
+      this.renderMenu();
+      void saveGameNow()
+        .then(({ ok, synced }) => {
+          if (ok) {
+            showToast(synced ? GAME_MENU_LABELS.saved : GAME_MENU_LABELS.savedLocal, "ok");
+          } else {
+            showToast(GAME_MENU_LABELS.saveFailed, "error", 4000);
+          }
+          if (this.menu === menu) {
+            menu.message = ok ? GAME_MENU_LABELS.saved : GAME_MENU_LABELS.saveFailed;
+            this.renderMenu();
+          }
+        })
+        .finally(() => {
+          this.gameMenuBusy = false;
+        });
+      return;
+    }
+    if (id === "gm:leaderboard") {
+      this.closeMenu();
+      void import("#app/catch/leaderboard-ui").then(m => m.showLeaderboard());
+      return;
+    }
+    if (id === "gm:cards") {
+      this.closeMenu();
+      void import("#app/catch/wallet-link").then(m => m.showClaimsList());
+      return;
+    }
+    if (id === "gm:settings") {
+      this.closeMenu();
+      this.openSettings();
+      return;
+    }
+    if (id === "gm:quit") {
+      this.quitToTitle(menu);
+    }
+  }
+
+  /** PokeRogue's settings screen over a paused town, like the party screen. */
+  private openSettings() {
+    if (this.leaving || this.switching || this.partyOpen || !battleRef) {
+      return;
+    }
+    this.partyOpen = true;
+    (window as any).__ccSettingsOpen = true;
+    this.input.keyboard?.resetKeys();
+    this.touchDir = null;
+    this.padHeld = null;
+    this.player.anims.stop();
+    this.townTouch?.setHidden(true);
+    setBattleTouchSuppressed(false);
+    const battle = battleRef;
+    this.scene.pause();
+    this.scene.setVisible(false);
+    battle.scene.resume();
+    battle.scene.setVisible(true);
+    releaseBattleKeys();
+    const ui = globalScene.ui;
+    const settingsModes = new Set<UiMode>([
+      UiMode.SETTINGS_GENERAL,
+      UiMode.SETTINGS_DISPLAY,
+      UiMode.SETTINGS_AUDIO,
+      UiMode.SETTINGS_GAMEPAD,
+      UiMode.SETTINGS_KEYBOARD,
+      UiMode.GAMEPAD_BINDING,
+      UiMode.KEYBOARD_BINDING,
+      UiMode.OPTION_SELECT,
+    ]);
+    void ui.setOverlayMode(UiMode.SETTINGS_GENERAL).then(() => {
+      const poll = window.setInterval(() => {
+        if (settingsModes.has(ui.mode)) {
+          return;
+        }
+        window.clearInterval(poll);
+        releaseBattleKeys();
+        battle.scene.pause();
+        battle.scene.setVisible(false);
+        this.scene.resume();
+        this.scene.setVisible(true);
+        this.input.keyboard?.resetKeys();
+        this.touchDir = null;
+        this.padHeld = null;
+        if (this.touchUi) {
+          setBattleTouchSuppressed(true);
+          this.townTouch?.setHidden(false);
+        }
+        this.time.delayedCall(500, () => {
+          this.partyOpen = false;
+          (window as any).__ccSettingsOpen = false;
+        });
+      }, 150);
+    });
+  }
+
+  /** Save first. Quit only when the save landed, so nothing is lost. */
+  private quitToTitle(menu: TownMenu) {
+    this.gameMenuBusy = true;
+    menu.message = GAME_MENU_LABELS.saving;
+    this.renderMenu();
+    void saveGameNow()
+      .then(({ ok }) => {
+        if (!ok) {
+          showToast(GAME_MENU_LABELS.saveFailed, "error", 4000);
+          if (this.menu === menu) {
+            menu.message = GAME_MENU_LABELS.saveFailed;
+            this.renderMenu();
+          }
+          return;
+        }
+        showToast(GAME_MENU_LABELS.saved, "ok");
+        this.closeMenu();
+        this.leaving = true;
+        this.releasePresence();
+        lastPos = { x: this.player.x, y: this.player.y };
+        lastArea = this.area;
+        resumeCb = null;
+        const battle = battleRef;
+        this.scene.stop();
+        battle?.scene.resume();
+        battle?.scene.setVisible(true);
+        globalScene.reset(true);
+      })
+      .finally(() => {
+        this.gameMenuBusy = false;
+      });
   }
 
   private healParty(): string {
