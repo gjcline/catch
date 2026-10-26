@@ -142,6 +142,14 @@ export async function catchStartRun(mode: string): Promise<void> {
   }
 }
 
+/** Called after Continue / loading a save: the run id lives only in memory, so re-attach to the server run. */
+export async function catchResumeRun(mode: string, wave: number): Promise<void> {
+  const res = await post("/api/runs/resume", { mode, wave: Math.max(1, wave || 1) });
+  if (res?.ok) {
+    runId = res.runId;
+  }
+}
+
 export function catchReport(
   type: "catch" | "battle_won" | "wave_reached" | "run_won",
   data: Record<string, unknown> = {},
