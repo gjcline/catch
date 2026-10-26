@@ -1,7 +1,7 @@
 import { pokerogueApi } from "#api/api";
 import { loggedInUser } from "#app/account";
 import { hideBootLoading, showBootLoading } from "#app/catch/boot-loading";
-import { catchStartRun } from "#app/catch/catch-client";
+import { catchResumeRun, catchStartRun } from "#app/catch/catch-client";
 import { GameMode, getGameMode } from "#app/game-mode";
 import { audioManager } from "#app/global-audio-manager";
 import { timedEventManager } from "#app/global-event-manager";
@@ -360,6 +360,12 @@ export class TitlePhase extends Phase {
   end(): void {
     if (!this.loaded) {
       void catchStartRun(globalScene.gameMode?.isDaily ? "daily" : this.gameMode === GameModes.ENDLESS ? "endless" : "classic");
+    } else {
+      const gm = globalScene.gameMode;
+      void catchResumeRun(
+        gm?.isDaily ? "daily" : gm?.modeId === GameModes.ENDLESS ? "endless" : "classic",
+        globalScene.currentBattle?.waveIndex ?? 1,
+      );
     }
     if (!this.loaded && !globalScene.gameMode.isDaily) {
       globalScene.gameMode = getGameMode(this.gameMode);
